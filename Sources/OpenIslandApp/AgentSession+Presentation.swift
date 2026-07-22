@@ -168,6 +168,12 @@ extension AgentSession {
     }
 
     var spotlightHeadlineText: String {
+        if tool == .codex,
+           let threadName = codexMetadata?.threadName?.trimmedForSurface,
+           !threadName.isEmpty {
+            return threadName
+        }
+
         let workspaceName = spotlightWorkspaceName
         var headline = workspaceName
 

@@ -5,6 +5,35 @@ import Testing
 
 /// Regression coverage for core session lifecycle and visibility behavior.
 struct SessionStateTests {
+    @Test
+    func codexMetadataUpdatesPreserveIndexedThreadName() {
+        let startedAt = Date(timeIntervalSince1970: 900)
+        var state = SessionState()
+        state.apply(.sessionStarted(SessionStarted(
+            sessionID: "codex-named-thread",
+            title: "Named thread",
+            tool: .codex,
+            summary: "Starting",
+            timestamp: startedAt,
+            codexMetadata: CodexSessionMetadata(
+                threadName: "修复 open-vibe-island Hub 问题",
+                initialUserPrompt: "Fix this issue."
+            )
+        )))
+
+        state.apply(.sessionMetadataUpdated(SessionMetadataUpdated(
+            sessionID: "codex-named-thread",
+            codexMetadata: CodexSessionMetadata(
+                initialUserPrompt: "Fix this issue.",
+                lastAssistantMessage: "Working on it."
+            ),
+            timestamp: startedAt.addingTimeInterval(1)
+        )))
+
+        #expect(state.session(id: "codex-named-thread")?.codexMetadata?.threadName == "修复 open-vibe-island Hub 问题")
+        #expect(state.session(id: "codex-named-thread")?.codexMetadata?.lastAssistantMessage == "Working on it.")
+    }
+
     /// Completed Codex CLI sessions outside Codex.app should age out even while Codex.app is running.
     @Test
     func completedCodexCLISessionEndsEvenWhenCodexAppIsRunning() {

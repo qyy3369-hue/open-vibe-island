@@ -30,6 +30,7 @@ struct CodexSessionTrackingTests {
                 ),
                 codexMetadata: CodexSessionMetadata(
                     transcriptPath: "/tmp/rollout.jsonl",
+                    threadName: "Fix rollout tracking",
                     initialUserPrompt: "Start by checking the rollout watcher.",
                     lastUserPrompt: "Check the rollout watcher state.",
                     lastAssistantMessage: "Inspecting rollout watcher.",
@@ -44,10 +45,32 @@ struct CodexSessionTrackingTests {
 
         #expect(reloaded == records)
         #expect(reloaded.first?.session.codexMetadata?.transcriptPath == "/tmp/rollout.jsonl")
+        #expect(reloaded.first?.session.codexMetadata?.threadName == "Fix rollout tracking")
         #expect(reloaded.first?.session.codexMetadata?.initialUserPrompt == "Start by checking the rollout watcher.")
         #expect(reloaded.first?.session.codexMetadata?.lastUserPrompt == "Check the rollout watcher state.")
         #expect(reloaded.first?.session.origin == .live)
         #expect(reloaded.first?.session.attachmentState == .attached)
+    }
+
+    @Test
+    func codexThreadNameIndexUsesLatestValidSidebarName() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-thread-index-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = rootURL.appendingPathComponent("session_index.jsonl")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let contents = """
+        {"id":"thread-1","thread_name":"Old title"}
+        malformed
+        {"id":"thread-2","thread_name":"Second title"}
+        {"id":"thread-1","thread_name":"Renamed title"}
+        """
+        try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let names = CodexThreadNameIndex.threadNames(fileURL: fileURL)
+
+        #expect(names == ["thread-1": "Renamed title", "thread-2": "Second title"])
     }
 
     @Test
@@ -1136,6 +1159,7 @@ struct CodexSessionTrackingTests {
         let staleDirectoryURL = rootURL.appendingPathComponent("2026/03/30", isDirectory: true)
         let recentRolloutURL = recentDirectoryURL.appendingPathComponent("rollout-recent.jsonl")
         let staleRolloutURL = staleDirectoryURL.appendingPathComponent("rollout-stale.jsonl")
+        let threadNameIndexURL = rootURL.appendingPathComponent("session_index.jsonl")
         let now = Date(timeIntervalSince1970: 1_743_555_200)
 
         try FileManager.default.createDirectory(at: recentDirectoryURL, withIntermediateDirectories: true)
@@ -1187,11 +1211,14 @@ struct CodexSessionTrackingTests {
 
         try recentLines.joined(separator: "\n").appending("\n").write(to: recentRolloutURL, atomically: true, encoding: .utf8)
         try staleLines.joined(separator: "\n").appending("\n").write(to: staleRolloutURL, atomically: true, encoding: .utf8)
+        try "{\"id\":\"codex-session-1\",\"thread_name\":\"Inspect rollout discovery\"}\n"
+            .write(to: threadNameIndexURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: recentRolloutURL.path)
         try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-172_800)], ofItemAtPath: staleRolloutURL.path)
 
         let discovery = CodexRolloutDiscovery(
             rootURL: rootURL,
+            threadNameIndexURL: threadNameIndexURL,
             fileManager: .default,
             maxAge: 86_400,
             maxFiles: 10
@@ -1201,7 +1228,7 @@ struct CodexSessionTrackingTests {
 
         #expect(records.count == 1)
         #expect(records.first?.sessionID == "codex-session-1")
-        #expect(records.first?.title == "Codex · open-island")
+        #expect(records.first?.title == "Inspect rollout discovery")
         #expect(records.first?.summary == "Inspecting the local rollout files.")
         #expect(records.first?.phase == .running)
         #expect(
@@ -1210,6 +1237,7 @@ struct CodexSessionTrackingTests {
             } == recentRolloutURL.resolvingSymlinksInPath().path
         )
         #expect(records.first?.codexMetadata?.lastAssistantMessage == "Inspecting the local rollout files.")
+        #expect(records.first?.codexMetadata?.threadName == "Inspect rollout discovery")
         #expect(records.first?.codexMetadata?.lastUserPrompt == "Inspect the local rollout files.")
         #expect(records.first?.codexMetadata?.currentTool == nil)
         #expect(records.first?.codexMetadata?.currentCommandPreview == nil)

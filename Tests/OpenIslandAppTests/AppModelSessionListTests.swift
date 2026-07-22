@@ -966,6 +966,7 @@ struct AppModelSessionListTests {
                     summary: "Recovered from cache",
                     updatedAt: now.addingTimeInterval(-60),
                     codexMetadata: CodexSessionMetadata(
+                        threadName: "Cached sidebar name",
                         initialUserPrompt: "# Files mentioned by the user: ## screenshot.png: /tmp/screenshot.png",
                         lastUserPrompt: "# Chrome tabs: - Current URL: https://example.com"
                     )
@@ -1014,6 +1015,7 @@ struct AppModelSessionListTests {
                 summary: "Recovered from rollout",
                 updatedAt: now,
                 codexMetadata: CodexSessionMetadata(
+                    threadName: "Renamed sidebar name",
                     initialUserPrompt: "Fix the session headline.",
                     lastUserPrompt: "The headline still looks wrong."
                 )
@@ -1050,6 +1052,7 @@ struct AppModelSessionListTests {
         let valid = merged.first(where: { $0.id == "valid-codex-session" })
         let environmentContext = merged.first(where: { $0.id == "environment-context-codex-session" })
         #expect(wrapped?.codexMetadata?.initialUserPrompt == "Fix the session headline.")
+        #expect(wrapped?.codexMetadata?.threadName == "Renamed sidebar name")
         #expect(wrapped?.codexMetadata?.lastUserPrompt == "The headline still looks wrong.")
         #expect(valid?.codexMetadata?.initialUserPrompt == "Keep this valid cached topic.")
         #expect(

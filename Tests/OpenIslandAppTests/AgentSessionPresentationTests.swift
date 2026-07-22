@@ -241,6 +241,32 @@ struct AgentSessionPresentationTests {
     }
 
     @Test
+    func codexHeadlinePrefersSidebarThreadNameOverInitialPrompt() {
+        let session = AgentSession(
+            id: "codex-named-session",
+            title: "Fix open-vibe-island Hub issue",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Working",
+            updatedAt: Date(timeIntervalSince1970: 10_000),
+            jumpTarget: JumpTarget(
+                terminalApp: "Codex.app",
+                workspaceName: "island",
+                paneTitle: "Codex",
+                workingDirectory: "/tmp/island"
+            ),
+            codexMetadata: CodexSessionMetadata(
+                threadName: "修复 open-vibe-island Hub 问题",
+                initialUserPrompt: "[@了解 open-vibe-island Hub](thread://example) 修复一下这个问题。"
+            )
+        )
+
+        #expect(session.spotlightHeadlineText == "修复 open-vibe-island Hub 问题")
+    }
+
+    @Test
     func detachedSessionHeadlineShowsInitialPrompt() {
         let session = AgentSession(
             id: "session-1",

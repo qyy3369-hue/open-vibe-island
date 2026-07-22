@@ -348,6 +348,7 @@ final class SessionDiscoveryCoordinator {
 
         let merged = CodexSessionMetadata(
             transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
+            threadName: discovered.threadName ?? existing.threadName,
             initialUserPrompt: initialUserPrompt,
             lastUserPrompt: discovered.lastUserPrompt ?? existing.lastUserPrompt,
             lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
@@ -462,13 +463,17 @@ final class SessionDiscoveryCoordinator {
         let existingIDs = Set(state.sessions.filter { $0.tool == .codex }.map(\.id))
         let existingPaths = Set(state.sessions.compactMap(\.codexMetadata?.transcriptPath))
 
-        let newRecords = records.filter { record in
-            !existingIDs.contains(record.sessionID)
-                && (record.codexMetadata?.transcriptPath).map { !existingPaths.contains($0) } ?? true
+        let recordsToMerge = records.filter { record in
+            if let existing = state.sessions.first(where: { $0.id == record.sessionID }) {
+                return record.codexMetadata?.threadName != existing.codexMetadata?.threadName
+            }
+            return !existingIDs.contains(record.sessionID)
+                && ((record.codexMetadata?.transcriptPath).map { !existingPaths.contains($0) } ?? true)
         }
-        guard !newRecords.isEmpty else { return }
+        guard !recordsToMerge.isEmpty else { return }
 
-        let newSessions = newRecords.map { record -> AgentSession in
+        let newRecordCount = recordsToMerge.filter { !existingIDs.contains($0.sessionID) }.count
+        let refreshedSessions = recordsToMerge.map { record -> AgentSession in
             var session = record.session
             session.isCodexAppSession = true
             session.isProcessAlive = true
@@ -490,11 +495,13 @@ final class SessionDiscoveryCoordinator {
             return session
         }
 
-        let merged = mergeDiscoveredSessions(newSessions)
+        let merged = mergeDiscoveredSessions(refreshedSessions)
         state = SessionState(sessions: merged)
         refreshCodexRolloutTracking()
         scheduleCodexSessionPersistence()
-        onStatusMessage?("Discovered \(newRecords.count) new Codex.app session(s) via rollout re-scan.")
+        if newRecordCount > 0 {
+            onStatusMessage?("Discovered \(newRecordCount) new Codex.app session(s) via rollout re-scan.")
+        }
     }
 
     // MARK: - Persistence scheduling
