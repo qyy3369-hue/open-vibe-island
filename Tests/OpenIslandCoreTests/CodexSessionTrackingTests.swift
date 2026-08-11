@@ -1243,6 +1243,15 @@ struct CodexSessionTrackingTests {
         #expect(records.first?.codexMetadata?.currentCommandPreview == nil)
         #expect(records.first?.origin == .live)
         #expect(records.first?.attachmentState == .stale)
+
+        try "{\"id\":\"codex-session-1\",\"thread_name\":\"Renamed cached rollout\"}\n"
+            .write(to: threadNameIndexURL, atomically: true, encoding: .utf8)
+
+        let renamedRecords = discovery.discoverRecentSessions(now: now)
+
+        #expect(discovery.lastScanDiagnostics.cacheHitCount == 1)
+        #expect(renamedRecords.first?.title == "Renamed cached rollout")
+        #expect(renamedRecords.first?.codexMetadata?.threadName == "Renamed cached rollout")
     }
 
     @Test
