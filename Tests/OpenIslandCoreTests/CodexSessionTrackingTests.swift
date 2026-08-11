@@ -1298,6 +1298,66 @@ struct CodexSessionTrackingTests {
     }
 
     @Test
+    func codexRolloutDiscoveryHandlesSingleLineSpanningManyReadChunks() throws {
+        // Codex rollouts can embed large tool results or context in one JSON
+        // object. Keep this as one multi-megabyte line so the streaming
+        // reader must carry an unfinished line across many 64 KB chunks.
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-discovery-long-line-\(UUID().uuidString)", isDirectory: true)
+        let rolloutDirectoryURL = rootURL.appendingPathComponent("2026/04/02", isDirectory: true)
+        let rolloutURL = rolloutDirectoryURL.appendingPathComponent("rollout-long-line.jsonl")
+        let now = Date(timeIntervalSince1970: 1_743_555_200)
+
+        try FileManager.default.createDirectory(at: rolloutDirectoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let oversizedLine = rolloutLine(
+            timestamp: "2026-04-02T04:03:45.000Z",
+            type: "event_msg",
+            payload: [
+                "type": "token_count",
+                "padding": String(repeating: "x", count: 2 * 1_024 * 1_024),
+            ]
+        )
+        let finalLine = rolloutLine(
+            timestamp: "2026-04-02T04:03:46.000Z",
+            type: "event_msg",
+            payload: [
+                "type": "agent_message",
+                "message": "Parsed after the oversized line.",
+            ]
+        )
+        let body = [
+            sessionMetaLine(
+                sessionID: "codex-session-long-line",
+                timestamp: "2026-04-02T04:03:44.000Z",
+                cwd: "/Users/wangruobing/Personal/open-island"
+            ),
+            oversizedLine,
+            finalLine,
+        ].joined(separator: "\n").appending("\n")
+
+        try body.write(to: rolloutURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: rolloutURL.path)
+
+        let fileSize = (try FileManager.default.attributesOfItem(atPath: rolloutURL.path)[.size] as? Int) ?? 0
+        #expect(fileSize > 32 * 64 * 1_024)
+
+        let discovery = CodexRolloutDiscovery(
+            rootURL: rootURL,
+            fileManager: .default,
+            maxAge: 86_400,
+            maxFiles: 10
+        )
+
+        let records = discovery.discoverRecentSessions(now: now)
+
+        #expect(records.count == 1)
+        #expect(records.first?.sessionID == "codex-session-long-line")
+        #expect(records.first?.codexMetadata?.lastAssistantMessage == "Parsed after the oversized line.")
+    }
+
+    @Test
     func codexRolloutDiscoveryHandlesTrailingLineWithoutNewline() throws {
         // A rollout written by Codex while the process is mid-flush
         // can land on disk without a trailing newline. The streamed

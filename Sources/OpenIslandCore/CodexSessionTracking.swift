@@ -569,13 +569,17 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         var buffer = Data()
         var bytesRead = 0
+        var scannedPrefixCount = 0
 
         while let chunk = try? fileHandle.read(upToCount: Self.streamingChunkSize),
               !chunk.isEmpty {
             buffer.append(chunk)
             bytesRead += chunk.count
             diagnostics.bytesRead += chunk.count
-            for line in extractCompleteLines(from: &buffer) {
+            for line in extractCompleteLines(
+                from: &buffer,
+                scannedPrefixCount: &scannedPrefixCount
+            ) {
                 CodexRolloutReducer.apply(line: line, to: &snapshot)
                 if sessionMeta == nil {
                     sessionMeta = parseSessionMeta(fromLine: line)
@@ -679,15 +683,43 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         )
     }
 
-    private func extractCompleteLines(from buffer: inout Data) -> [String] {
+    private func extractCompleteLines(
+        from buffer: inout Data,
+        scannedPrefixCount: inout Int
+    ) -> [String] {
         let newline = UInt8(ascii: "\n")
         var lines: [String] = []
-        while let newlineIndex = buffer.firstIndex(of: newline) {
-            let lineData = buffer.prefix(upTo: newlineIndex)
-            buffer.removeSubrange(...newlineIndex)
-            guard !lineData.isEmpty else { continue }
-            lines.append(String(decoding: lineData, as: UTF8.self))
+
+        // A rollout line can span many 64 KB read chunks. Remember how much
+        // of the unfinished line was already searched so each append scans
+        // only new bytes. Restarting `firstIndex` at the beginning on every
+        // chunk made a multi-megabyte JSON line approach quadratic work.
+        var lineStart = buffer.startIndex
+        var searchStart = buffer.index(
+            buffer.startIndex,
+            offsetBy: min(scannedPrefixCount, buffer.count)
+        )
+        var consumedEnd: Data.Index?
+
+        while searchStart < buffer.endIndex,
+              let newlineIndex = buffer[searchStart...].firstIndex(of: newline) {
+            if lineStart < newlineIndex {
+                lines.append(String(decoding: buffer[lineStart..<newlineIndex], as: UTF8.self))
+            }
+
+            let nextLineStart = buffer.index(after: newlineIndex)
+            consumedEnd = nextLineStart
+            lineStart = nextLineStart
+            searchStart = nextLineStart
         }
+
+        // Remove complete lines once per chunk instead of shifting the Data
+        // buffer after every line. The remainder is the one unfinished line.
+        if let consumedEnd {
+            buffer.removeSubrange(buffer.startIndex..<consumedEnd)
+        }
+
+        scannedPrefixCount = buffer.count
         return lines
     }
 }
