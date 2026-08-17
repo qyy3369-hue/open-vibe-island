@@ -125,6 +125,97 @@ struct DeepSeekSessionDiscoveryTests {
     }
 
     @Test
+    func discoverySkipsBlankSessionsWithoutAUserTask() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let projCacheJSON = """
+        {
+          "tables": {
+            "sessions": {
+              "session-blank-1": {
+                "identity": {
+                  "createdAt": 1786953500000,
+                  "cwd": "/Users/test/Documents/repo"
+                },
+                "rows": {
+                  "sessionStats": {
+                    "val": {
+                      "turns": 0,
+                      "steps": 0,
+                      "openStep": null,
+                      "pendingCalls": {}
+                    }
+                  },
+                  "sessionListMetadata": {
+                    "val": {
+                      "blank": true,
+                      "lastPromptAt": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        try projCacheJSON.write(to: tempDir.appendingPathComponent("session_projcache.json"))
+
+        let sessions = DeepSeekSessionDiscovery().loadSessions(from: tempDir)
+
+        #expect(sessions.isEmpty)
+    }
+
+    @Test
+    func discoveryKeepsFirstPromptRunningBeforeItsFirstStepStarts() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let projCacheJSON = """
+        {
+          "tables": {
+            "sessions": {
+              "session-awaiting-step-1": {
+                "identity": {
+                  "createdAt": 1786953500000,
+                  "cwd": "/Users/test/Documents/repo"
+                },
+                "rows": {
+                  "sessionStats": {
+                    "val": {
+                      "turns": 0,
+                      "steps": 0,
+                      "openStep": null,
+                      "pendingCalls": {}
+                    }
+                  },
+                  "sessionListMetadata": {
+                    "val": {
+                      "blank": false,
+                      "lastPromptAt": 1786953600000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        try projCacheJSON.write(to: tempDir.appendingPathComponent("session_projcache.json"))
+
+        let sessions = DeepSeekSessionDiscovery().loadSessions(from: tempDir)
+        let record = try #require(sessions.first)
+
+        #expect(sessions.count == 1)
+        #expect(record.phase == .running)
+        #expect(record.turns == 0)
+    }
+
+    @Test
     func multipleSessionsInSameDirectoryAreKeptDistinct() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

@@ -271,7 +271,8 @@ public final class DeepSeekSessionDiscovery: @unchecked Sendable {
                 ? Date(timeIntervalSince1970: createdAtMs / 1000.0)
                 : (try? fileManager.attributesOfItem(atPath: projCacheURL.path)[.creationDate] as? Date) ?? .now
 
-            let lastPromptAtMs = sessionEntry.rows?.sessionListMetadata?.val?.lastPromptAt ?? 0
+            let listMetadata = sessionEntry.rows?.sessionListMetadata?.val
+            let lastPromptAtMs = listMetadata?.lastPromptAt ?? 0
             let updatedAt = lastPromptAtMs > 0
                 ? Date(timeIntervalSince1970: lastPromptAtMs / 1000.0)
                 : createdAt
@@ -283,7 +284,14 @@ public final class DeepSeekSessionDiscovery: @unchecked Sendable {
 
             let hasActiveOpenStep = stats?.openStep != nil && !stats!.openStep!.isNull
             let hasActivePendingCalls = stats?.pendingCalls?.isEmpty == false
-            let isRunning = hasActiveOpenStep || hasActivePendingCalls
+            let hasActiveWork = hasActiveOpenStep || hasActivePendingCalls
+            let hasObservedTask = lastPromptAtMs > 0 || turns > 0 || hasActiveWork
+            guard listMetadata?.blank != true, hasObservedTask else { continue }
+
+            // Before the first step starts, a submitted prompt has turns == 0
+            // and no openStep yet. Keep it running until a completed turn is
+            // durably observed instead of reporting a false completion.
+            let isRunning = hasActiveWork || turns == 0
 
             let phase: SessionPhase = isRunning ? .running : .completed
 
