@@ -405,7 +405,10 @@ public final class DeepSeekStorageWatcher: @unchecked Sendable {
                 }
             } else {
                 // Newly discovered session while watcher is active
-                let initialPhase = current.phase
+                // A fast task can finish before the first persisted snapshot is
+                // observed. Bootstrap it as running so the immediately following
+                // completion remains a real transition for notification dedupe.
+                let initialPhase: SessionPhase = .running
                 eventHandler?(
                     .sessionStarted(
                         SessionStarted(
@@ -414,13 +417,13 @@ public final class DeepSeekStorageWatcher: @unchecked Sendable {
                             tool: .deepseekHarness,
                             origin: .live,
                             initialPhase: initialPhase,
-                            summary: initialPhase == .running ? current.runningSummary : current.completedSummary,
+                            summary: current.runningSummary,
                             timestamp: .now,
                             jumpTarget: current.defaultJumpTarget
                         )
                     )
                 )
-                if initialPhase == .completed {
+                if current.phase == .completed {
                     eventHandler?(
                         .sessionCompleted(
                             SessionCompleted(

@@ -54,7 +54,6 @@ final class ProcessMonitoringCoordinator {
     private static let idlePollInterval: TimeInterval = 300
     private static let cursorStalenessTimeout: TimeInterval = 600  // 10 minutes
     private static let antigravityStalenessTimeout: TimeInterval = 600  // 10 minutes
-    private static let antigravityRunningTimeout: TimeInterval = 300    // 5 minutes
     private static let deepseekStalenessTimeout: TimeInterval = 600     // 10 minutes
     private static let deepseekRunningTimeout: TimeInterval = 300       // 5 minutes
     private static let codexAppStalenessTimeout: TimeInterval = 600  // 10 minutes
