@@ -2,6 +2,8 @@
 
 OpenIsland receives hook events from AI agents (Codex / Claude Code / Gemini CLI / Antigravity) via the `OpenIslandHooks` CLI. The CLI forwards payloads to the app over a Unix socket and, when necessary, writes a directive back to stdout so the agent can act on it (e.g. block a tool call).
 
+DeepSeek Harness is not part of this hook pipeline. It is monitored read-only through native storage discovery; see [docs/architecture.md](./architecture.md#storage-observed-agents-deepseek-harness) and [docs/agent-handbook.md](./agent-handbook.md#32-原生存储监听方式-native-storage-watcher).
+
 ## Architecture
 
 ```
