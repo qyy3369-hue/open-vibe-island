@@ -468,6 +468,9 @@ public final class BridgeServer: @unchecked Sendable {
 
         case let .processGeminiHook(payload):
             handleGeminiHook(payload, from: clientID)
+
+        case let .processDeepSeekHook(payload):
+            handleDeepSeekHook(payload, from: clientID)
         }
     }
 
@@ -1296,6 +1299,64 @@ public final class BridgeServer: @unchecked Sendable {
             )
             send(.response(.acknowledged), to: clientID)
         }
+    }
+
+    private func handleDeepSeekHook(_ payload: DeepSeekHookPayload, from clientID: UUID) {
+        guard let hookEventName = payload.hookEventName else {
+            send(.response(.acknowledged), to: clientID)
+            return
+        }
+
+        ensureDeepSeekSessionExists(for: payload)
+
+        switch hookEventName {
+        case .sessionStart:
+            // Session creation already handled by ensureDeepSeekSessionExists.
+            break
+
+        case .turnStart:
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.runningSummary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+
+        case .turnEnd:
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: payload.stoppedSummary,
+                        timestamp: .now
+                    )
+                )
+            )
+        }
+
+        send(.response(.acknowledged), to: clientID)
+    }
+
+    private func ensureDeepSeekSessionExists(for payload: DeepSeekHookPayload) {
+        guard !hasSession(id: payload.sessionID) else { return }
+        emit(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: payload.sessionID,
+                    title: payload.sessionTitle,
+                    tool: .deepseekHarness,
+                    origin: .live,
+                    initialPhase: .running,
+                    summary: payload.runningSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget
+                )
+            )
+        )
     }
 
     private func handleGeminiHook(_ payload: GeminiHookPayload, from clientID: UUID) {

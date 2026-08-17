@@ -11,6 +11,7 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
     case codebuddy
     case cursor
     case kimiCLI
+    case deepseekHarness
 
     public var displayName: String {
         switch self {
@@ -34,6 +35,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "Cursor"
         case .kimiCLI:
             "Kimi CLI"
+        case .deepseekHarness:
+            "DeepSeek Harness"
         }
     }
 
@@ -59,6 +62,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "CURSOR"
         case .kimiCLI:
             "KIMI"
+        case .deepseekHarness:
+            "DEEPSEEK"
         }
     }
 
@@ -87,6 +92,7 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
         case .factory:    "#6e9fff"
         case .codebuddy:  "#fca5a5"
         case .kimiCLI:    "#fde047"
+        case .deepseekHarness: "#4d6bfe"
         }
     }
 }

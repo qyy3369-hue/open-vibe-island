@@ -215,6 +215,23 @@ struct ActiveAgentProcessDiscovery {
                 ))
                 continue
             }
+
+            if isDeepSeekProcess(command: process.command) {
+                let claimKey = "deepseek:\(process.pid)"
+                guard claimedKeys.insert(claimKey).inserted else {
+                    continue
+                }
+
+                let lsofOutput = lsofOutput(pid: process.pid)
+                snapshots.append(ProcessSnapshot(
+                    tool: .deepseekHarness,
+                    sessionID: nil,
+                    workingDirectory: lsofOutput.flatMap(workingDirectory(from:)),
+                    terminalTTY: process.terminalTTY,
+                    terminalApp: terminalApp(for: process, processesByPID: processesByPID)
+                ))
+                continue
+            }
         }
 
         return snapshots
@@ -767,6 +784,40 @@ struct ActiveAgentProcessDiscovery {
         }
 
         return firstToken == "kimi" || firstToken.hasSuffix("/kimi")
+    }
+
+    /// Returns `true` when the given `ps` command string belongs to a DeepSeek Harness process.
+    /// Matches the `dsh` CLI binary and npm/npx package runners invoking `@deepseek-ai/dsh`.
+    private func isDeepSeekProcess(command: String) -> Bool {
+        let lowered = command.lowercased()
+        guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
+            return false
+        }
+
+        // Direct dsh binary
+        if firstToken == "dsh" || firstToken.hasSuffix("/dsh") {
+            return true
+        }
+
+        // Node/npx runners with @deepseek-ai/dsh
+        guard lowered.contains("dsh") || lowered.contains("deepseek") else {
+            return false
+        }
+
+        let isPackageRunner = firstToken == "npx" || firstToken.hasSuffix("/npx")
+            || firstToken == "bunx" || firstToken.hasSuffix("/bunx")
+            || firstToken == "pnpx" || firstToken.hasSuffix("/pnpx")
+        if isPackageRunner && (lowered.contains("@deepseek-ai/dsh") || lowered.contains("deepseek-harness")) {
+            return true
+        }
+
+        let isNode = firstToken == "node" || firstToken.hasSuffix("/node")
+            || firstToken == "bun" || firstToken.hasSuffix("/bun")
+        if isNode && (lowered.contains("@deepseek-ai/dsh") || lowered.contains("/dsh/") || lowered.contains("deepseek-harness")) {
+            return true
+        }
+
+        return false
     }
 
     /// Returns `true` when the given `ps` command string belongs to a Claude Code process.
