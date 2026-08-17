@@ -89,6 +89,7 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
     case processOpenCodeHook(OpenCodeHookPayload)
     case processCursorHook(CursorHookPayload)
     case processGeminiHook(GeminiHookPayload)
+    case processAntigravityHook(AntigravityHookPayload)
     case processDeepSeekHook(DeepSeekHookPayload)
 
     private enum CodingKeys: String, CodingKey {
@@ -103,6 +104,7 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case openCodeHook
         case cursorHook
         case geminiHook
+        case antigravityHook
         case deepseekHook
     }
 
@@ -116,6 +118,7 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case processOpenCodeHook
         case processCursorHook
         case processGeminiHook
+        case processAntigravityHook
         case processDeepSeekHook
     }
 
@@ -151,6 +154,10 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
             self = .processCursorHook(try container.decode(CursorHookPayload.self, forKey: .cursorHook))
         case .processGeminiHook:
             self = .processGeminiHook(try container.decode(GeminiHookPayload.self, forKey: .geminiHook))
+        case .processAntigravityHook:
+            self = .processAntigravityHook(
+                try container.decode(AntigravityHookPayload.self, forKey: .antigravityHook)
+            )
         case .processDeepSeekHook:
             self = .processDeepSeekHook(
                 try container.decode(DeepSeekHookPayload.self, forKey: .deepseekHook)
@@ -192,6 +199,9 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case let .processGeminiHook(payload):
             try container.encode(CommandType.processGeminiHook, forKey: .type)
             try container.encode(payload, forKey: .geminiHook)
+        case let .processAntigravityHook(payload):
+            try container.encode(CommandType.processAntigravityHook, forKey: .type)
+            try container.encode(payload, forKey: .antigravityHook)
         case let .processDeepSeekHook(payload):
             try container.encode(CommandType.processDeepSeekHook, forKey: .type)
             try container.encode(payload, forKey: .deepseekHook)

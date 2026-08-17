@@ -103,6 +103,7 @@ struct AgentSessionPresentationTests {
         let expectedNames: [(AgentTool, String)] = [
             (.claudeCode, "Claude"),
             (.codex, "Codex"),
+            (.antigravity, "Antigravity"),
             (.geminiCLI, "Gemini"),
             (.openCode, "OpenCode"),
             (.qoder, "Qoder"),
@@ -211,6 +212,31 @@ struct AgentSessionPresentationTests {
         // Headline uses initial prompt (session topic), prompt line uses latest
         #expect(session.spotlightHeadlineText == "worktree · Start by fixing the island hover behavior.")
         #expect(session.spotlightPromptLineText == "You: Now make the overlay height fit the content.")
+    }
+
+    @Test
+    func headlineOmitsRootWorkspacePlaceholderWhenPromptExists() {
+        let session = AgentSession(
+            id: "codex-root-session",
+            title: "Codex · /",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Working",
+            updatedAt: Date(timeIntervalSince1970: 10_000),
+            jumpTarget: JumpTarget(
+                terminalApp: "Codex.app",
+                workspaceName: "/",
+                paneTitle: "Codex",
+                workingDirectory: "/"
+            ),
+            codexMetadata: CodexSessionMetadata(
+                initialUserPrompt: "Fix the session headline."
+            )
+        )
+
+        #expect(session.spotlightHeadlineText == "Fix the session headline.")
     }
 
     @Test
