@@ -170,6 +170,11 @@ struct TerminalJumpService {
             bundleIdentifier: "com.jetbrains.rustrover",
             aliases: ["rustrover"]
         ),
+        TerminalAppDescriptor(
+            displayName: "DeepSeek Harness",
+            bundleIdentifier: "io.github.hairyf.deepseek-harness-desktop",
+            aliases: ["deepseek harness", "deepseek"]
+        ),
     ]
 
     /// Bundle identifiers of JetBrains IDEs.
@@ -358,6 +363,13 @@ struct TerminalJumpService {
                 // deep link, so return to its Agent Manager surface.
                 try openAction(["-b", "com.google.antigravity"])
                 return "Activated Antigravity."
+            case "io.github.hairyf.deepseek-harness-desktop":
+                // DeepSeek Harness hosts its sessions in the desktop app / web
+                // GUI; there is no per-session deep link, so bring the app
+                // forward instead of opening the working directory in a
+                // terminal (the historical fallthrough behavior).
+                try openAction(["-b", "io.github.hairyf.deepseek-harness-desktop"])
+                return "Activated DeepSeek Harness."
             case "com.googlecode.iterm2":
                 if try jumpToITermSession(target) {
                     return "Focused the matching iTerm session."
