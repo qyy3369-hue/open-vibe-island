@@ -314,8 +314,14 @@ struct AppModelSessionListTests {
     func islandSessionSectionsGroupStaleCompletedIntoIdle() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionGroup = .state
-        model.completedStaleThreshold = .fiveMinutes
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .fiveMinutes
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .fiveMinutes
+        }
 
         var approval = listSession(id: "approval", phase: .waitingForApproval, updatedAt: now)
         approval.permissionRequest = PermissionRequest(
@@ -340,8 +346,14 @@ struct AppModelSessionListTests {
     func islandSessionSectionsKeepCompletedInDoneWhenStaleThresholdIsNever() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionGroup = .state
-        model.completedStaleThreshold = .never
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .never
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .never
+        }
 
         var oldDone = listSession(id: "old-done", phase: .completed, updatedAt: now.addingTimeInterval(-86_400))
         oldDone.isProcessAlive = true
@@ -355,7 +367,12 @@ struct AppModelSessionListTests {
     func islandSessionListCanSortByLastUpdate() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionSort = .lastUpdate
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionSort = .lastUpdate
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionSort = .lastUpdate
+        }
 
         var olderRunning = listSession(id: "older-running", phase: .running, updatedAt: now.addingTimeInterval(-120))
         var newerCompleted = listSession(id: "newer-completed", phase: .completed, updatedAt: now.addingTimeInterval(-10))
@@ -562,6 +579,57 @@ struct AppModelSessionListTests {
         #expect(model.notchStatus == .closed)
         #expect(model.notchOpenReason == nil)
         #expect(model.islandSurface == .sessionList())
+    }
+
+    @Test
+    func deepSeekFastCompletionPresentsNotificationAfterRunningBootstrap() async throws {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel(
+            isNotificationSessionAlreadyFrontmost: { _ in false }
+        )
+        model.isResolvingInitialLiveSessions = false
+        model.notchStatus = .closed
+        model.notchOpenReason = nil
+
+        model.applyTrackedEvent(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: "deepseek-fast-session",
+                    title: "DeepSeek · Fast Task",
+                    tool: .deepseekHarness,
+                    origin: .live,
+                    initialPhase: .running,
+                    summary: "DeepSeek is working on Fast Task.",
+                    timestamp: now
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .rollout
+        )
+        model.applyTrackedEvent(
+            .sessionCompleted(
+                SessionCompleted(
+                    sessionID: "deepseek-fast-session",
+                    summary: "DeepSeek completed task.",
+                    timestamp: now.addingTimeInterval(1)
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .rollout
+        )
+
+        for _ in 0..<20 {
+            if model.notchStatus == .opened {
+                break
+            }
+            await Task.yield()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(model.state.session(id: "deepseek-fast-session")?.phase == .completed)
+        #expect(model.notchStatus == .opened)
+        #expect(model.notchOpenReason == .notification)
+        #expect(model.islandSurface == .sessionList(actionableSessionID: "deepseek-fast-session"))
     }
 
     @Test

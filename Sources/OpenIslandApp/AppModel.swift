@@ -677,6 +677,16 @@ final class AppModel {
             }
         }
 
+        discovery.deepSeekWatcher.eventHandler = { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.applyTrackedEvent(
+                    event,
+                    updateLastActionMessage: false,
+                    ingress: .rollout
+                )
+            }
+        }
+
         codexAppServer.onEvent = { [weak self] event in
             self?.applyTrackedEvent(event, ingress: .bridge)
         }

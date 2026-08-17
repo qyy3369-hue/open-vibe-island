@@ -11,7 +11,8 @@ struct AgentsGridRightSlotTests {
     @Test
     func bulkFirstObservationOrdersByHistoricalFirstSeenAt() {
         let model = AppModel()
-        model.islandRightSlot = .agents
+        model.updateAppearancePreferences(for: .notch) { $0.rightSlot = .agents }
+        model.updateAppearancePreferences(for: .topBar) { $0.rightSlot = .agents }
 
         let now = Date(timeIntervalSince1970: 100_000)
         let sessionA = makeSession(id: "A", firstSeenAt: now,                       updatedAt: now.addingTimeInterval(60))
@@ -46,7 +47,8 @@ struct AgentsGridRightSlotTests {
     @Test
     func newlyObservedSessionAlwaysLandsAtTheEndRegardlessOfHistoricalTime() {
         let model = AppModel()
-        model.islandRightSlot = .agents
+        model.updateAppearancePreferences(for: .notch) { $0.rightSlot = .agents }
+        model.updateAppearancePreferences(for: .topBar) { $0.rightSlot = .agents }
 
         let now = Date(timeIntervalSince1970: 200_000)
         let sessionA = makeSession(id: "A", firstSeenAt: now,                       updatedAt: now)
@@ -79,7 +81,8 @@ struct AgentsGridRightSlotTests {
     @Test
     func returningSessionKeepsItsOriginalSlot() {
         let model = AppModel()
-        model.islandRightSlot = .agents
+        model.updateAppearancePreferences(for: .notch) { $0.rightSlot = .agents }
+        model.updateAppearancePreferences(for: .topBar) { $0.rightSlot = .agents }
 
         let now = Date(timeIntervalSince1970: 300_000)
         let sessionA = makeSession(id: "A", firstSeenAt: now,                       updatedAt: now)
@@ -110,7 +113,8 @@ struct AgentsGridRightSlotTests {
     @Test
     func moreThanNineSessionsFoldIntoOverflow() {
         let model = AppModel()
-        model.islandRightSlot = .agents
+        model.updateAppearancePreferences(for: .notch) { $0.rightSlot = .agents }
+        model.updateAppearancePreferences(for: .topBar) { $0.rightSlot = .agents }
         let now = Date(timeIntervalSince1970: 200_000)
 
         var sessions: [AgentSession] = []
@@ -141,7 +145,8 @@ struct AgentsGridRightSlotTests {
     @Test
     func cellStateReflectsSessionPhase() {
         let model = AppModel()
-        model.islandRightSlot = .agents
+        model.updateAppearancePreferences(for: .notch) { $0.rightSlot = .agents }
+        model.updateAppearancePreferences(for: .topBar) { $0.rightSlot = .agents }
         let now = Date(timeIntervalSince1970: 300_000)
 
         let running  = makeSession(id: "r", firstSeenAt: now,                         updatedAt: now, phase: .running)

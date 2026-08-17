@@ -165,7 +165,7 @@ struct AntigravityHooksTests {
     }
 
     @Test
-    func nonIdleStopKeepsTaskRunning() async throws {
+    func nonIdleStopEmitsActivityUpdatedAndKeepsRunning() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
         try server.start()
@@ -176,25 +176,48 @@ struct AntigravityHooksTests {
         defer { observer.disconnect() }
         try await observer.send(.registerClient(role: .observer))
 
-        let payload = AntigravityHookPayload(
-            conversationID: "antigravity-session-background",
+        let runningPayload = AntigravityHookPayload(
+            conversationID: "antigravity-session-running",
             workspacePaths: ["/tmp/worktree"],
+            invocationNum: 0,
+            hookEventName: .preInvocation
+        )
+        let nonIdleStopPayload = AntigravityHookPayload(
+            conversationID: "antigravity-session-running",
+            workspacePaths: ["/tmp/worktree"],
+            executionNum: 1,
             terminationReason: "model_stop",
             fullyIdle: false,
             hookEventName: .stop
         )
-        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(payload))
+
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(runningPayload))
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(nonIdleStopPayload))
 
         var iterator = stream.makeAsyncIterator()
-        let activity = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
-            guard case let .activityUpdated(update) = $0 else { return false }
-            return update.summary.contains("background tasks")
+        let started = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
+            if case .sessionStarted = $0 { return true }
+            return false
         }
-        guard case let .activityUpdated(update) = activity else {
-            Issue.record("Expected Antigravity background-task activity")
+        guard case let .sessionStarted(startPayload) = started else {
+            Issue.record("Expected Antigravity session start")
             return
         }
-        #expect(update.phase == .running)
+        #expect(startPayload.sessionID == "antigravity-session-running")
+
+        let nonIdleActivity = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
+            if case let .activityUpdated(update) = $0, update.summary.contains("still has background tasks") {
+                return true
+            }
+            return false
+        }
+        guard case let .activityUpdated(activity) = nonIdleActivity else {
+            Issue.record("Expected activity update for non-idle stop")
+            return
+        }
+        #expect(activity.sessionID == "antigravity-session-running")
+        #expect(activity.phase == .running)
+        #expect(activity.summary == "Antigravity still has background tasks in worktree.")
     }
 }
 

@@ -154,6 +154,8 @@ final class HookInstallationCoordinator {
         kimiHookStatus?.managedHooksPresent == true
     }
 
+
+
     var claudeUsageInstalled: Bool {
         claudeStatusLineStatus?.managedStatusLineInstalled == true
     }
@@ -373,6 +375,8 @@ final class HookInstallationCoordinator {
         }
         return status.managedHooksPresent ? "managed task lifecycle hooks present" : "no managed Antigravity hooks"
     }
+
+
 
     var kimiHookStatusTitle: String {
         if kimiHooksInstalled {
@@ -791,6 +795,8 @@ final class HookInstallationCoordinator {
         }
     }
 
+
+
     func refreshClaudeUsageState() {
         let manager = claudeStatusLineInstallationManager
         Task { [weak self] in
@@ -1115,6 +1121,8 @@ final class HookInstallationCoordinator {
         }
     }
 
+
+
     func installClaudeUsageBridge() {
         updateClaudeUsageBridge(userMessage: "Installing Claude usage bridge.", intent: .installed) { manager in
             do {
@@ -1353,6 +1361,8 @@ final class HookInstallationCoordinator {
             }
         }
     }
+
+
 
     private func updateClaudeUsageBridge(
         userMessage: String,

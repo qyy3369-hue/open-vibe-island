@@ -1301,6 +1301,8 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
+
+
     private func handleGeminiHook(_ payload: GeminiHookPayload, from clientID: UUID) {
         switch payload.hookEventName {
         case .sessionStart:
