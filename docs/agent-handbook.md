@@ -83,6 +83,7 @@ Agent 在执行特定生命周期节点时调用 `OpenIslandHooks --source <name
 
 - **DeepSeek Harness (`DeepSeekSessionDiscovery` & `DeepSeekStorageWatcher`)**:
   - **存储路径**：
+    - 自定义路径：设置 `DSH_HOME` 时读取 `$DSH_HOME/storages/`。
     - 桌面端：`~/Library/Application Support/io.github.hairyf.deepseek-harness-desktop/data/dsh/storages/`
     - CLI 端：`~/.dsh/storages/`
   - **文件格式**：
@@ -90,9 +91,15 @@ Agent 在执行特定生命周期节点时调用 `OpenIslandHooks --source <name
     - `session_projcache.json`：包含会话详情，`tables.sessions.<sessionID>` 下有 `identity.cwd`, `rows.title.val`, `rows.sessionStats.val`。
   - **状态判断逻辑**：
     - 当 `openStep != nil` 或 `pendingCalls` 非空时，判定为正在执行步骤（`.running`）。
+    - 用户刚提交首个 Prompt、但尚未持久化第一个 Step 时，`turns == 0`，仍判定为 `.running`，避免过早报完成。
     - 当 `openStep == nil` 且 `turns > 0` 时，判定为执行完毕（`.completed`）。
+    - `sessionListMetadata.blank == true`，或没有 Prompt、Turn、活动 Step/Pending Call 证据的空白会话，不显示在岛上。
+  - **发现与通知时序**：
+    - App 启动时先加载一次当前快照，再启动默认 2 秒轮询；启动前已经完成的任务不会重放完成通知。
+    - 轮询期间首次看到的任务即使已经快速完成，也会先产生 `.running` 启动事件，再产生 `.completed`，确保完成卡片不会被去重逻辑吞掉。
   - **重要注意事项**：
     - **切勿**向 `~/.dsh/profiles/web/cordis.patch.yml` 添加不存在的 `hooks:` 键（该文件顶层为 YAML 数组，追加对象会导致 DeepSeek 启动失败）。
+    - DeepSeek 接入必须保持只读：不安装 Hook、不修改 Harness 配置，只读取原生 storage 文件。
     - 每个 DeepSeek 会话保持独立的 `session-<uuid>`，互不干扰。
 
 ---
@@ -116,10 +123,10 @@ Agent 在执行特定生命周期节点时调用 `OpenIslandHooks --source <name
 2. **构建与测试工具链**：
    - 必须使用 Swift 6 工具链编译和测试：
      ```bash
-     ~/Library/Developer/Toolchains/swift-6.2.4-RELEASE.xctoolchain/usr/bin/swift test
+     TOOLCHAINS=org.swift.624202602241a xcrun swift test
      ```
 3. **验证原则**：
-   - 每次代码修改完成后，必须先执行针对性测试或全量测试（当前基准 340+ 测试均需保持 Passing）。
+   - 每次代码修改完成后，必须先执行针对性测试；合并前运行全量测试并保持 Passing。不要在文档中固定易过期的测试总数。
 4. **Git Commit 规范**：
    - 每次完成一个独立功能的修改并验证通过后，必须立即使用 Conventional Commits 规范（如 `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`）提交，不可遗留未暂存修改。
 5. **本地开发 App 刷新**：
@@ -135,5 +142,31 @@ Agent 在执行特定生命周期节点时调用 `OpenIslandHooks --source <name
    - 开发者可能在同一目录开启多个独立会话（例如主 Agent、子 Agent 或双任务），绝不能仅根据 `workingDirectory` 相同就把它们强行揉成一个会话。各工具均有其全局唯一 ID。
 3. **DeepSeek 配置兼容性**：
    - DeepSeek Harness 的 `cordis.patch.yml` 是补丁数组配置，不要尝试通过改写此文件注入 Shell Hook，使用文件存储监听（`DeepSeekSessionDiscovery`）是唯一稳健的方案。
-4. **Swift Testing 偏好隔离**：
+4. **DeepSeek 快速完成与空白会话**：
+   - 新会话可能在第一次 2 秒轮询前就完成，必须保留 `.running -> .completed` 两步事件；同时必须过滤 `blank` 和无任务证据的记录，不能用“能解析到 session ID”作为显示条件。
+5. **Swift Testing 偏好隔离**：
    - 在涉及 `AppModel`、`SessionState`、显示设置的测试中，需注意清理或隔离 `UserDefaults`，防止跨测试用例污染。
+
+---
+
+## 6. Antigravity 与 DeepSeek 维护索引
+
+| 范围 | 实现入口 | 关键测试 |
+|---|---|---|
+| Antigravity payload 与状态摘要 | `Sources/OpenIslandCore/AntigravityHooks.swift` | `Tests/OpenIslandCoreTests/AntigravityHooksTests.swift` |
+| Antigravity Hook 安装/卸载 | `Sources/OpenIslandCore/AntigravityHookInstaller.swift`, `AntigravityHookInstallationManager.swift` | `Tests/OpenIslandCoreTests/AntigravityHooksTests.swift` |
+| Antigravity 事件转为 Session 状态 | `Sources/OpenIslandCore/BridgeServer.swift` | `Tests/OpenIslandCoreTests/AntigravityHooksTests.swift` |
+| DeepSeek storage 解析与轮询 | `Sources/OpenIslandCore/DeepSeekSessionDiscovery.swift` | `Tests/OpenIslandCoreTests/DeepSeekSessionDiscoveryTests.swift`, `DeepSeekStorageWatcherTests.swift` |
+| DeepSeek 启动发现与通知接入 | `Sources/OpenIslandApp/SessionDiscoveryCoordinator.swift`, `AppModel.swift` | `Tests/OpenIslandAppTests/AppModelSessionListTests.swift` |
+| Agent 进程关联与存活清理 | `Sources/OpenIslandApp/ActiveAgentProcessDiscovery.swift`, `ProcessMonitoringCoordinator.swift` | 对应的 App process-monitoring 测试 |
+
+针对这两类监控功能的最低验证命令：
+
+```bash
+TOOLCHAINS=org.swift.624202602241a xcrun swift test --filter AntigravityHooksTests
+TOOLCHAINS=org.swift.624202602241a xcrun swift test --filter DeepSeekSessionDiscoveryTests
+TOOLCHAINS=org.swift.624202602241a xcrun swift test --filter DeepSeekStorageWatcherTests
+TOOLCHAINS=org.swift.624202602241a xcrun swift test --filter AppModelSessionListTests
+```
+
+涉及跨模块状态流、通知展示或进程探活时，不能只跑单个 parser 测试；合并前还要执行 `scripts/harness.sh ci`。

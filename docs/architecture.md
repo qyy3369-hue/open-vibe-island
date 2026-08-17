@@ -13,7 +13,7 @@ The project is a single Swift package with four targets:
 
 ## Data Flow
 
-### Hook-based agents (Codex, Claude Code, and forks)
+### Hook-based agents (Codex, Claude Code and forks, Gemini CLI, Antigravity)
 
 ```
 Agent
@@ -37,12 +37,27 @@ Agent
 OpenCode → JS plugin (~/.config/opencode/plugins/) → Unix socket → BridgeServer → AppModel → UI
 ```
 
+### Storage-observed agents (DeepSeek Harness)
+
+```
+DeepSeek Harness Desktop / dsh CLI
+  │  writes workspace.json + session_projcache.json
+  ▼
+DeepSeekSessionDiscovery
+  │  startup snapshot + 2-second polling
+  ▼
+DeepSeekStorageWatcher → AgentEvent → AppModel → SessionState → UI
+```
+
+This path is intentionally read-only. It does not install a DeepSeek hook or modify `cordis.patch.yml`. `ActiveAgentProcessDiscovery` separately detects `dsh` and supported Node/package-runner forms so the monitoring coordinator can reconcile storage records with live processes.
+
 ### Session discovery (on launch)
 
-1. Restore cached sessions from registry
-2. Discover recent JSONL transcripts (`~/.claude/projects/`)
-3. Reconcile with active terminal processes
-4. Start live bridge
+1. Restore cached Codex, Claude, OpenCode, and Cursor sessions from their registries
+2. Discover Codex rollout JSONL, Claude transcript JSONL, and DeepSeek native storage records
+3. Merge records by source-stable session identifiers
+4. Prime the DeepSeek watcher without replaying completion notifications for sessions that were already complete before launch
+5. Reconcile with active terminal/agent processes and start the live bridge
 
 **Fail-open principle**: if the bridge is unavailable, the hook process exits silently without writing to stdout, so the agent continues running unaffected.
 
@@ -58,6 +73,15 @@ The shared `AgentEvent` enum drives all state transitions:
 - Jump target updated
 
 Each event carries a stable session identifier, agent type, timestamps, and enough metadata to route approvals or focus changes.
+
+Source identity is preserved across adapters. Antigravity uses `conversationId`; DeepSeek Harness uses its persisted session UUID. A shared working directory alone is never sufficient to merge two independent sessions.
+
+## Completion Semantics
+
+- **Antigravity**: `PreInvocation` is running. `Stop` is completed only when `fullyIdle == true`; otherwise it remains running because background work may still exist.
+- **DeepSeek Harness**: a non-null `openStep`, non-empty `pendingCalls`, or a submitted first prompt with no completed turn is running. A task is completed after active work clears and `turns > 0`.
+- **DeepSeek filtering**: records marked `sessionListMetadata.blank == true`, or records with no prompt, turn, or active work evidence, are not surfaced.
+- **Fast DeepSeek tasks**: a newly discovered completed task is emitted as a running bootstrap followed by completion so notification deduplication does not suppress the completion card.
 
 ## State Management
 
