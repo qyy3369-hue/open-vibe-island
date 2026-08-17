@@ -90,7 +90,6 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
     case processCursorHook(CursorHookPayload)
     case processGeminiHook(GeminiHookPayload)
     case processAntigravityHook(AntigravityHookPayload)
-    case processDeepSeekHook(DeepSeekHookPayload)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -105,7 +104,6 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case cursorHook
         case geminiHook
         case antigravityHook
-        case deepseekHook
     }
 
     private enum CommandType: String, Codable {
@@ -119,7 +117,6 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case processCursorHook
         case processGeminiHook
         case processAntigravityHook
-        case processDeepSeekHook
     }
 
     public init(from decoder: any Decoder) throws {
@@ -157,10 +154,6 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case .processAntigravityHook:
             self = .processAntigravityHook(
                 try container.decode(AntigravityHookPayload.self, forKey: .antigravityHook)
-            )
-        case .processDeepSeekHook:
-            self = .processDeepSeekHook(
-                try container.decode(DeepSeekHookPayload.self, forKey: .deepseekHook)
             )
         }
     }
@@ -202,9 +195,6 @@ public enum BridgeCommand: Equatable, Codable, Sendable {
         case let .processAntigravityHook(payload):
             try container.encode(CommandType.processAntigravityHook, forKey: .type)
             try container.encode(payload, forKey: .antigravityHook)
-        case let .processDeepSeekHook(payload):
-            try container.encode(CommandType.processDeepSeekHook, forKey: .type)
-            try container.encode(payload, forKey: .deepseekHook)
         }
     }
 }

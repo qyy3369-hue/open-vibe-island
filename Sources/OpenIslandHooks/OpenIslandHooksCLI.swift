@@ -19,13 +19,12 @@ struct OpenIslandHooksCLI {
         case gemini
         case antigravity
         case kimi
-        case deepseek
 
         var isClaudeFormat: Bool {
             switch self {
             case .claude, .qoder, .qwen, .factory, .droid, .codebuddy, .kimi:
                 return true
-            case .codex, .cursor, .gemini, .antigravity, .deepseek:
+            case .codex, .cursor, .gemini, .antigravity:
                 return false
             }
         }
@@ -126,16 +125,6 @@ struct OpenIslandHooksCLI {
                     .withHookEvent(antigravityEvent)
 
                 _ = try? client.send(.processAntigravityHook(payload), timeout: 45)
-            case .deepseek:
-                guard let deepseekEvent = deepseekHookEvent(arguments: arguments) else {
-                    logStderr("missing DeepSeek hook event")
-                    return
-                }
-                let payload = try decoder
-                    .decode(DeepSeekHookPayload.self, from: input)
-                    .withHookEvent(deepseekEvent)
-
-                _ = try? client.send(.processDeepSeekHook(payload), timeout: 45)
             }
         } catch {
             // Hooks should fail open so the CLI continues working even if the bridge is unavailable.
@@ -181,22 +170,6 @@ struct OpenIslandHooksCLI {
                 switch arguments[index + 1] {
                 case "pre-invocation": return .preInvocation
                 case "stop": return .stop
-                default: return nil
-                }
-            }
-            index += 1
-        }
-        return nil
-    }
-
-    private static func deepseekHookEvent(arguments: [String]) -> DeepSeekHookEventName? {
-        var index = 0
-        while index < arguments.count {
-            if arguments[index] == "--event", index + 1 < arguments.count {
-                switch arguments[index + 1] {
-                case "turn-start": return .turnStart
-                case "turn-end": return .turnEnd
-                case "session-start": return .sessionStart
                 default: return nil
                 }
             }

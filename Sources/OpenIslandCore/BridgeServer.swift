@@ -471,9 +471,6 @@ public final class BridgeServer: @unchecked Sendable {
 
         case let .processAntigravityHook(payload):
             handleAntigravityHook(payload, from: clientID)
-
-        case let .processDeepSeekHook(payload):
-            handleDeepSeekHook(payload, from: clientID)
         }
     }
 
@@ -1304,81 +1301,7 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
-    private func resolvedDeepSeekSessionID(for payload: DeepSeekHookPayload) -> String {
-        if hasSession(id: payload.sessionID) {
-            return payload.sessionID
-        }
 
-        if let workingDirectory = payload.workingDirectory,
-           let existing = localState.sessions.first(where: {
-               $0.tool == .deepseekHarness
-                   && !$0.isSessionEnded
-                   && $0.jumpTarget?.workingDirectory == workingDirectory
-           }) {
-            return existing.id
-        }
-
-        return payload.sessionID
-    }
-
-    private func handleDeepSeekHook(_ payload: DeepSeekHookPayload, from clientID: UUID) {
-        guard let hookEventName = payload.hookEventName else {
-            send(.response(.acknowledged), to: clientID)
-            return
-        }
-
-        let sessionID = resolvedDeepSeekSessionID(for: payload)
-        ensureDeepSeekSessionExists(for: payload, resolvedSessionID: sessionID)
-
-        switch hookEventName {
-        case .sessionStart:
-            // Session creation already handled by ensureDeepSeekSessionExists.
-            break
-
-        case .turnStart:
-            emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
-                        sessionID: sessionID,
-                        summary: payload.runningSummary,
-                        phase: .running,
-                        timestamp: .now
-                    )
-                )
-            )
-
-        case .turnEnd:
-            emit(
-                .sessionCompleted(
-                    SessionCompleted(
-                        sessionID: sessionID,
-                        summary: payload.stoppedSummary,
-                        timestamp: .now
-                    )
-                )
-            )
-        }
-
-        send(.response(.acknowledged), to: clientID)
-    }
-
-    private func ensureDeepSeekSessionExists(for payload: DeepSeekHookPayload, resolvedSessionID: String) {
-        guard !hasSession(id: resolvedSessionID) else { return }
-        emit(
-            .sessionStarted(
-                SessionStarted(
-                    sessionID: resolvedSessionID,
-                    title: payload.sessionTitle,
-                    tool: .deepseekHarness,
-                    origin: .live,
-                    initialPhase: .running,
-                    summary: payload.runningSummary,
-                    timestamp: .now,
-                    jumpTarget: payload.defaultJumpTarget
-                )
-            )
-        )
-    }
 
     private func handleGeminiHook(_ payload: GeminiHookPayload, from clientID: UUID) {
         switch payload.hookEventName {
@@ -1469,38 +1392,20 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
-    private func resolvedAntigravitySessionID(for payload: AntigravityHookPayload) -> String {
-        if hasSession(id: payload.conversationID) {
-            return payload.conversationID
-        }
-
-        if let workingDirectory = payload.workingDirectory,
-           let existing = localState.sessions.first(where: {
-               $0.tool == .antigravity
-                   && !$0.isSessionEnded
-                   && $0.jumpTarget?.workingDirectory == workingDirectory
-           }) {
-            return existing.id
-        }
-
-        return payload.conversationID
-    }
-
     private func handleAntigravityHook(_ payload: AntigravityHookPayload, from clientID: UUID) {
         guard let hookEventName = payload.hookEventName else {
             send(.response(.acknowledged), to: clientID)
             return
         }
 
-        let sessionID = resolvedAntigravitySessionID(for: payload)
-        ensureAntigravitySessionExists(for: payload, resolvedSessionID: sessionID)
+        ensureAntigravitySessionExists(for: payload)
 
         switch hookEventName {
         case .preInvocation:
             emit(
                 .activityUpdated(
                     SessionActivityUpdated(
-                        sessionID: sessionID,
+                        sessionID: payload.conversationID,
                         summary: payload.runningSummary,
                         phase: .running,
                         timestamp: .now
@@ -1509,26 +1414,39 @@ public final class BridgeServer: @unchecked Sendable {
             )
 
         case .stop:
-            emit(
-                .sessionCompleted(
-                    SessionCompleted(
-                        sessionID: sessionID,
-                        summary: payload.stoppedSummary,
-                        timestamp: .now
+            if payload.fullyIdle != true {
+                emit(
+                    .activityUpdated(
+                        SessionActivityUpdated(
+                            sessionID: payload.conversationID,
+                            summary: "Antigravity still has background tasks in \(payload.workspaceName).",
+                            phase: .running,
+                            timestamp: .now
+                        )
                     )
                 )
-            )
+            } else {
+                emit(
+                    .sessionCompleted(
+                        SessionCompleted(
+                            sessionID: payload.conversationID,
+                            summary: payload.stoppedSummary,
+                            timestamp: .now
+                        )
+                    )
+                )
+            }
         }
 
         send(.response(.acknowledged), to: clientID)
     }
 
-    private func ensureAntigravitySessionExists(for payload: AntigravityHookPayload, resolvedSessionID: String) {
-        guard !hasSession(id: resolvedSessionID) else { return }
+    private func ensureAntigravitySessionExists(for payload: AntigravityHookPayload) {
+        guard !hasSession(id: payload.conversationID) else { return }
         emit(
             .sessionStarted(
                 SessionStarted(
-                    sessionID: resolvedSessionID,
+                    sessionID: payload.conversationID,
                     title: payload.sessionTitle,
                     tool: .antigravity,
                     origin: .live,

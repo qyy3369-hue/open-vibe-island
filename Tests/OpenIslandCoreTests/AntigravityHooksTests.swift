@@ -165,7 +165,7 @@ struct AntigravityHooksTests {
     }
 
     @Test
-    func subagentsInSameWorkspaceAggregateIntoSingleSession() async throws {
+    func nonIdleStopEmitsActivityUpdatedAndKeepsRunning() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
         try server.start()
@@ -176,62 +176,48 @@ struct AntigravityHooksTests {
         defer { observer.disconnect() }
         try await observer.send(.registerClient(role: .observer))
 
-        // Main session starts
-        let mainPayload = AntigravityHookPayload(
-            conversationID: "main-conversation-uuid",
-            workspacePaths: ["/tmp/my-project"],
+        let runningPayload = AntigravityHookPayload(
+            conversationID: "antigravity-session-running",
+            workspacePaths: ["/tmp/worktree"],
+            invocationNum: 0,
             hookEventName: .preInvocation
         )
-        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(mainPayload))
+        let nonIdleStopPayload = AntigravityHookPayload(
+            conversationID: "antigravity-session-running",
+            workspacePaths: ["/tmp/worktree"],
+            executionNum: 1,
+            terminationReason: "model_stop",
+            fullyIdle: false,
+            hookEventName: .stop
+        )
+
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(runningPayload))
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(nonIdleStopPayload))
 
         var iterator = stream.makeAsyncIterator()
         let started = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
             if case .sessionStarted = $0 { return true }
             return false
         }
-        guard case let .sessionStarted(startEvent) = started else {
-            Issue.record("Expected main session to start")
+        guard case let .sessionStarted(startPayload) = started else {
+            Issue.record("Expected Antigravity session start")
             return
         }
-        #expect(startEvent.sessionID == "main-conversation-uuid")
+        #expect(startPayload.sessionID == "antigravity-session-running")
 
-        // Subagent starts with a different UUID but same workspace
-        let subagentPayload = AntigravityHookPayload(
-            conversationID: "subagent-uuid-999",
-            workspacePaths: ["/tmp/my-project"],
-            hookEventName: .preInvocation
-        )
-        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(subagentPayload))
-
-        // Should receive activityUpdated for the MAIN session ID, NOT a new sessionStarted
-        let subActivity = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
-            if case .activityUpdated = $0 { return true }
+        let nonIdleActivity = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
+            if case let .activityUpdated(update) = $0, update.summary.contains("still has background tasks") {
+                return true
+            }
             return false
         }
-        guard case let .activityUpdated(update) = subActivity else {
-            Issue.record("Expected subagent to emit activity update on main session")
+        guard case let .activityUpdated(activity) = nonIdleActivity else {
+            Issue.record("Expected activity update for non-idle stop")
             return
         }
-        #expect(update.sessionID == "main-conversation-uuid")
-
-        // Subagent completes turn
-        let stopPayload = AntigravityHookPayload(
-            conversationID: "subagent-uuid-999",
-            workspacePaths: ["/tmp/my-project"],
-            terminationReason: "model_stop",
-            hookEventName: .stop
-        )
-        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(stopPayload))
-
-        let completed = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
-            if case .sessionCompleted = $0 { return true }
-            return false
-        }
-        guard case let .sessionCompleted(comp) = completed else {
-            Issue.record("Expected completion event for main session")
-            return
-        }
-        #expect(comp.sessionID == "main-conversation-uuid")
+        #expect(activity.sessionID == "antigravity-session-running")
+        #expect(activity.phase == .running)
+        #expect(activity.summary == "Antigravity still has background tasks in worktree.")
     }
 }
 
