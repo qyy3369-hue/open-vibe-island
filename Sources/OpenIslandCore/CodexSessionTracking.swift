@@ -3,6 +3,7 @@ import Foundation
 
 public struct CodexSessionMetadata: Equatable, Codable, Sendable {
     public var transcriptPath: String?
+    public var threadName: String?
     public var initialUserPrompt: String?
     public var lastUserPrompt: String?
     public var lastAssistantMessage: String?
@@ -11,6 +12,7 @@ public struct CodexSessionMetadata: Equatable, Codable, Sendable {
 
     public init(
         transcriptPath: String? = nil,
+        threadName: String? = nil,
         initialUserPrompt: String? = nil,
         lastUserPrompt: String? = nil,
         lastAssistantMessage: String? = nil,
@@ -18,6 +20,7 @@ public struct CodexSessionMetadata: Equatable, Codable, Sendable {
         currentCommandPreview: String? = nil
     ) {
         self.transcriptPath = transcriptPath
+        self.threadName = threadName
         self.initialUserPrompt = initialUserPrompt
         self.lastUserPrompt = lastUserPrompt
         self.lastAssistantMessage = lastAssistantMessage
@@ -27,11 +30,56 @@ public struct CodexSessionMetadata: Equatable, Codable, Sendable {
 
     public var isEmpty: Bool {
         transcriptPath == nil
+            && threadName == nil
             && initialUserPrompt == nil
             && lastUserPrompt == nil
             && lastAssistantMessage == nil
             && currentTool == nil
             && currentCommandPreview == nil
+    }
+}
+
+public enum CodexThreadNameIndex: Sendable {
+    private struct Entry: Decodable {
+        var id: String
+        var threadName: String
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case threadName = "thread_name"
+        }
+    }
+
+    public static var defaultFileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/session_index.jsonl")
+    }
+
+    /// Reads Codex's local sidebar-name index without opening the app-server.
+    /// Later entries win so an appended rename replaces an older name.
+    public static func threadNames(
+        fileURL: URL = defaultFileURL,
+        fileManager: FileManager = .default
+    ) -> [String: String] {
+        guard fileManager.fileExists(atPath: fileURL.path),
+              let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return [:]
+        }
+
+        let decoder = JSONDecoder()
+        var names: [String: String] = [:]
+        for line in contents.split(whereSeparator: \.isNewline) {
+            guard let data = String(line).data(using: .utf8),
+                  let entry = try? decoder.decode(Entry.self, from: data) else {
+                continue
+            }
+
+            let id = entry.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = entry.threadName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, !name.isEmpty else { continue }
+            names[id] = name
+        }
+        return names
     }
 }
 
@@ -389,6 +437,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
     }
 
     private let rootURL: URL
+    private let threadNameIndexURL: URL
     private let fileManager: FileManager
     private let maxAge: TimeInterval
     private let maxFiles: Int
@@ -404,11 +453,13 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
     public init(
         rootURL: URL = CodexRolloutDiscovery.defaultRootURL,
+        threadNameIndexURL: URL = CodexThreadNameIndex.defaultFileURL,
         fileManager: FileManager = .default,
         maxAge: TimeInterval = 86_400,
         maxFiles: Int = 40
     ) {
         self.rootURL = rootURL
+        self.threadNameIndexURL = threadNameIndexURL
         self.fileManager = fileManager
         self.maxAge = maxAge
         self.maxFiles = maxFiles
@@ -443,6 +494,10 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         }
 
         let cutoff = now.addingTimeInterval(-maxAge)
+        let threadNames = CodexThreadNameIndex.threadNames(
+            fileURL: threadNameIndexURL,
+            fileManager: fileManager
+        )
         var candidates: [Candidate] = []
 
         for case let fileURL as URL in enumerator {
@@ -493,6 +548,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
                 fileURL: candidate.fileURL,
                 modifiedAt: candidate.modifiedAt,
                 fileSize: candidate.fileSize,
+                threadNames: threadNames,
                 diagnostics: &diagnostics
             ) else {
                 continue
@@ -518,6 +574,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         fileURL: URL,
         modifiedAt: Date,
         fileSize: Int,
+        threadNames: [String: String],
         diagnostics: inout CodexRolloutDiscoveryDiagnostics
     ) -> CodexTrackedSessionRecord? {
         // Rollouts are append-only folds, so parse them incrementally:
@@ -535,7 +592,11 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         if let cached = state, cached.fileSize == fileSize, cached.modifiedAt == modifiedAt {
             diagnostics.cacheHitCount += 1
-            return cached.record
+            return recordByApplyingThreadName(
+                cached.record,
+                sessionMeta: cached.sessionMeta,
+                threadNames: threadNames
+            )
         }
         if let cached = state,
            fileSize < cached.consumedOffset
@@ -610,7 +671,8 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
             fileURL: fileURL,
             modifiedAt: modifiedAt,
             snapshot: recordSnapshot,
-            sessionMeta: recordMeta
+            sessionMeta: recordMeta,
+            threadNames: threadNames
         )
 
         stateLock.lock()
@@ -631,14 +693,17 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         fileURL: URL,
         modifiedAt: Date,
         snapshot: CodexRolloutSnapshot,
-        sessionMeta: SessionMeta?
+        sessionMeta: SessionMeta?,
+        threadNames: [String: String]
     ) -> CodexTrackedSessionRecord? {
         guard let sessionMeta else { return nil }
 
         let summary = snapshot.summary ?? sessionMeta.defaultSummary
         let updatedAt = snapshot.updatedAt ?? sessionMeta.timestamp ?? modifiedAt
+        let threadName = threadNames[sessionMeta.sessionID]
         let metadata = CodexSessionMetadata(
             transcriptPath: fileURL.path,
+            threadName: threadName,
             initialUserPrompt: snapshot.initialUserPrompt,
             lastUserPrompt: snapshot.lastUserPrompt,
             lastAssistantMessage: snapshot.lastAssistantMessage,
@@ -648,7 +713,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         return CodexTrackedSessionRecord(
             sessionID: sessionMeta.sessionID,
-            title: sessionMeta.sessionTitle,
+            title: threadName ?? sessionMeta.sessionTitle,
             origin: .live,
             attachmentState: .stale,
             summary: summary,
@@ -656,6 +721,22 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
             updatedAt: updatedAt,
             codexMetadata: metadata
         )
+    }
+
+    private func recordByApplyingThreadName(
+        _ cachedRecord: CodexTrackedSessionRecord?,
+        sessionMeta: SessionMeta?,
+        threadNames: [String: String]
+    ) -> CodexTrackedSessionRecord? {
+        guard var record = cachedRecord else { return nil }
+
+        let threadName = threadNames[record.sessionID]
+        record.title = threadName ?? sessionMeta?.sessionTitle ?? record.title
+
+        var metadata = record.codexMetadata ?? CodexSessionMetadata()
+        metadata.threadName = threadName
+        record.codexMetadata = metadata.isEmpty ? nil : metadata
+        return record
     }
 
     private static let streamingChunkSize = 64 * 1_024
