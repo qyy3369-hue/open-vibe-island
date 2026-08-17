@@ -54,6 +54,9 @@ final class ProcessMonitoringCoordinator {
     private static let idlePollInterval: TimeInterval = 300
     private static let cursorStalenessTimeout: TimeInterval = 600  // 10 minutes
     private static let antigravityStalenessTimeout: TimeInterval = 600  // 10 minutes
+    private static let antigravityRunningTimeout: TimeInterval = 300    // 5 minutes
+    private static let deepseekStalenessTimeout: TimeInterval = 600     // 10 minutes
+    private static let deepseekRunningTimeout: TimeInterval = 300       // 5 minutes
     private static let codexAppStalenessTimeout: TimeInterval = 600  // 10 minutes
     private static let claudeDesktopStalenessTimeout: TimeInterval = 600  // 10 minutes
 
@@ -513,14 +516,46 @@ final class ProcessMonitoringCoordinator {
         // Antigravity 2.0 is a standalone desktop manager. Its JSON hooks
         // expose conversation IDs, but there is no corresponding child PID
         // to match. Keep hook-managed conversations alive while the app is
-        // running, then let completed cards expire after a short window.
+        // running, expiring completed cards or stalled running cards after a timeout.
         let isAntigravityRunning = Self.isAntigravityRunning()
         if isAntigravityRunning {
             for session in sessions where session.tool == .antigravity && !session.isDemoSession {
                 if session.isSessionEnded { continue }
-                let isStale = session.phase == .completed
+                let isCompletedStale = session.phase == .completed
                     && session.updatedAt.addingTimeInterval(Self.antigravityStalenessTimeout) < Date.now
-                if !isStale {
+                let isRunningStalled = session.phase == .running
+                    && session.updatedAt.addingTimeInterval(Self.antigravityRunningTimeout) < Date.now
+                if !isCompletedStale && !isRunningStalled {
+                    aliveIDs.insert(session.id)
+                }
+            }
+        }
+
+        // DeepSeek Harness sessions: match active processes (dsh / node)
+        // and keep hook-managed sessions alive while the process is active.
+        let deepseekProcesses = activeProcesses.filter { $0.tool == .deepseekHarness }
+        let trackedDeepSeekSessions = sessions.filter { $0.tool == .deepseekHarness && !$0.isDemoSession }
+        var claimedDeepSeekSessionIDs: Set<String> = []
+        for process in deepseekProcesses {
+            guard let matched = uniqueTrackedDeepSeekSession(
+                for: process,
+                sessions: trackedDeepSeekSessions,
+                claimedSessionIDs: claimedDeepSeekSessionIDs
+            ) else {
+                continue
+            }
+            aliveIDs.insert(matched.id)
+            claimedDeepSeekSessionIDs.insert(matched.id)
+        }
+
+        if !deepseekProcesses.isEmpty {
+            for session in trackedDeepSeekSessions where !claimedDeepSeekSessionIDs.contains(session.id) {
+                if session.isSessionEnded { continue }
+                let isCompletedStale = session.phase == .completed
+                    && session.updatedAt.addingTimeInterval(Self.deepseekStalenessTimeout) < Date.now
+                let isRunningStalled = session.phase == .running
+                    && session.updatedAt.addingTimeInterval(Self.deepseekRunningTimeout) < Date.now
+                if !isCompletedStale && !isRunningStalled {
                     aliveIDs.insert(session.id)
                 }
             }
@@ -592,6 +627,33 @@ final class ProcessMonitoringCoordinator {
         }
 
         return aliveIDs
+    }
+
+    private func uniqueTrackedDeepSeekSession(
+        for process: ActiveProcessSnapshot,
+        sessions: [AgentSession],
+        claimedSessionIDs: Set<String>
+    ) -> AgentSession? {
+        let unclaimedSessions = sessions.filter { !claimedSessionIDs.contains($0.id) }
+        guard !unclaimedSessions.isEmpty else {
+            return nil
+        }
+
+        if let processSessionID = process.sessionID,
+           let matched = unclaimedSessions.first(where: { $0.id == processSessionID }) {
+            return matched
+        }
+
+        if let processWorkingDirectory = process.workingDirectory {
+            let workspaceMatches = unclaimedSessions.filter {
+                $0.jumpTarget?.workingDirectory == processWorkingDirectory
+            }
+            if !workspaceMatches.isEmpty {
+                return workspaceMatches.max { $0.updatedAt < $1.updatedAt }
+            }
+        }
+
+        return unclaimedSessions.count == 1 ? unclaimedSessions[0] : nil
     }
 
     private enum OpenCodeMatchResult {

@@ -314,8 +314,14 @@ struct AppModelSessionListTests {
     func islandSessionSectionsGroupStaleCompletedIntoIdle() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionGroup = .state
-        model.completedStaleThreshold = .fiveMinutes
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .fiveMinutes
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .fiveMinutes
+        }
 
         var approval = listSession(id: "approval", phase: .waitingForApproval, updatedAt: now)
         approval.permissionRequest = PermissionRequest(
@@ -340,8 +346,14 @@ struct AppModelSessionListTests {
     func islandSessionSectionsKeepCompletedInDoneWhenStaleThresholdIsNever() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionGroup = .state
-        model.completedStaleThreshold = .never
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .never
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .never
+        }
 
         var oldDone = listSession(id: "old-done", phase: .completed, updatedAt: now.addingTimeInterval(-86_400))
         oldDone.isProcessAlive = true
@@ -355,7 +367,12 @@ struct AppModelSessionListTests {
     func islandSessionListCanSortByLastUpdate() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionSort = .lastUpdate
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionSort = .lastUpdate
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionSort = .lastUpdate
+        }
 
         var olderRunning = listSession(id: "older-running", phase: .running, updatedAt: now.addingTimeInterval(-120))
         var newerCompleted = listSession(id: "newer-completed", phase: .completed, updatedAt: now.addingTimeInterval(-10))

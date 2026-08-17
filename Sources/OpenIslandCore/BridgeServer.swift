@@ -1304,13 +1304,31 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
+    private func resolvedDeepSeekSessionID(for payload: DeepSeekHookPayload) -> String {
+        if hasSession(id: payload.sessionID) {
+            return payload.sessionID
+        }
+
+        if let workingDirectory = payload.workingDirectory,
+           let existing = localState.sessions.first(where: {
+               $0.tool == .deepseekHarness
+                   && !$0.isSessionEnded
+                   && $0.jumpTarget?.workingDirectory == workingDirectory
+           }) {
+            return existing.id
+        }
+
+        return payload.sessionID
+    }
+
     private func handleDeepSeekHook(_ payload: DeepSeekHookPayload, from clientID: UUID) {
         guard let hookEventName = payload.hookEventName else {
             send(.response(.acknowledged), to: clientID)
             return
         }
 
-        ensureDeepSeekSessionExists(for: payload)
+        let sessionID = resolvedDeepSeekSessionID(for: payload)
+        ensureDeepSeekSessionExists(for: payload, resolvedSessionID: sessionID)
 
         switch hookEventName {
         case .sessionStart:
@@ -1321,7 +1339,7 @@ public final class BridgeServer: @unchecked Sendable {
             emit(
                 .activityUpdated(
                     SessionActivityUpdated(
-                        sessionID: payload.sessionID,
+                        sessionID: sessionID,
                         summary: payload.runningSummary,
                         phase: .running,
                         timestamp: .now
@@ -1333,7 +1351,7 @@ public final class BridgeServer: @unchecked Sendable {
             emit(
                 .sessionCompleted(
                     SessionCompleted(
-                        sessionID: payload.sessionID,
+                        sessionID: sessionID,
                         summary: payload.stoppedSummary,
                         timestamp: .now
                     )
@@ -1344,12 +1362,12 @@ public final class BridgeServer: @unchecked Sendable {
         send(.response(.acknowledged), to: clientID)
     }
 
-    private func ensureDeepSeekSessionExists(for payload: DeepSeekHookPayload) {
-        guard !hasSession(id: payload.sessionID) else { return }
+    private func ensureDeepSeekSessionExists(for payload: DeepSeekHookPayload, resolvedSessionID: String) {
+        guard !hasSession(id: resolvedSessionID) else { return }
         emit(
             .sessionStarted(
                 SessionStarted(
-                    sessionID: payload.sessionID,
+                    sessionID: resolvedSessionID,
                     title: payload.sessionTitle,
                     tool: .deepseekHarness,
                     origin: .live,
@@ -1451,20 +1469,38 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
+    private func resolvedAntigravitySessionID(for payload: AntigravityHookPayload) -> String {
+        if hasSession(id: payload.conversationID) {
+            return payload.conversationID
+        }
+
+        if let workingDirectory = payload.workingDirectory,
+           let existing = localState.sessions.first(where: {
+               $0.tool == .antigravity
+                   && !$0.isSessionEnded
+                   && $0.jumpTarget?.workingDirectory == workingDirectory
+           }) {
+            return existing.id
+        }
+
+        return payload.conversationID
+    }
+
     private func handleAntigravityHook(_ payload: AntigravityHookPayload, from clientID: UUID) {
         guard let hookEventName = payload.hookEventName else {
             send(.response(.acknowledged), to: clientID)
             return
         }
 
-        ensureAntigravitySessionExists(for: payload)
+        let sessionID = resolvedAntigravitySessionID(for: payload)
+        ensureAntigravitySessionExists(for: payload, resolvedSessionID: sessionID)
 
         switch hookEventName {
         case .preInvocation:
             emit(
                 .activityUpdated(
                     SessionActivityUpdated(
-                        sessionID: payload.conversationID,
+                        sessionID: sessionID,
                         summary: payload.runningSummary,
                         phase: .running,
                         timestamp: .now
@@ -1473,39 +1509,26 @@ public final class BridgeServer: @unchecked Sendable {
             )
 
         case .stop:
-            if payload.fullyIdle != true {
-                emit(
-                    .activityUpdated(
-                        SessionActivityUpdated(
-                            sessionID: payload.conversationID,
-                            summary: "Antigravity still has background tasks in \(payload.workspaceName).",
-                            phase: .running,
-                            timestamp: .now
-                        )
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: sessionID,
+                        summary: payload.stoppedSummary,
+                        timestamp: .now
                     )
                 )
-            } else {
-                emit(
-                    .sessionCompleted(
-                        SessionCompleted(
-                            sessionID: payload.conversationID,
-                            summary: payload.stoppedSummary,
-                            timestamp: .now
-                        )
-                    )
-                )
-            }
+            )
         }
 
         send(.response(.acknowledged), to: clientID)
     }
 
-    private func ensureAntigravitySessionExists(for payload: AntigravityHookPayload) {
-        guard !hasSession(id: payload.conversationID) else { return }
+    private func ensureAntigravitySessionExists(for payload: AntigravityHookPayload, resolvedSessionID: String) {
+        guard !hasSession(id: resolvedSessionID) else { return }
         emit(
             .sessionStarted(
                 SessionStarted(
-                    sessionID: payload.conversationID,
+                    sessionID: resolvedSessionID,
                     title: payload.sessionTitle,
                     tool: .antigravity,
                     origin: .live,
