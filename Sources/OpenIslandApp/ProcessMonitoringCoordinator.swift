@@ -523,9 +523,7 @@ final class ProcessMonitoringCoordinator {
                 if session.isSessionEnded { continue }
                 let isCompletedStale = session.phase == .completed
                     && session.updatedAt.addingTimeInterval(Self.antigravityStalenessTimeout) < Date.now
-                let isRunningStalled = session.phase == .running
-                    && session.updatedAt.addingTimeInterval(Self.antigravityRunningTimeout) < Date.now
-                if !isCompletedStale && !isRunningStalled {
+                if !isCompletedStale {
                     aliveIDs.insert(session.id)
                 }
             }

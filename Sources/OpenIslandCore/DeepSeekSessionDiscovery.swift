@@ -405,18 +405,28 @@ public final class DeepSeekStorageWatcher: @unchecked Sendable {
                 }
             } else {
                 // Newly discovered session while watcher is active
-                if current.phase == .running {
+                let initialPhase = current.phase
+                eventHandler?(
+                    .sessionStarted(
+                        SessionStarted(
+                            sessionID: current.sessionID,
+                            title: current.sessionTitle,
+                            tool: .deepseekHarness,
+                            origin: .live,
+                            initialPhase: initialPhase,
+                            summary: initialPhase == .running ? current.runningSummary : current.completedSummary,
+                            timestamp: .now,
+                            jumpTarget: current.defaultJumpTarget
+                        )
+                    )
+                )
+                if initialPhase == .completed {
                     eventHandler?(
-                        .sessionStarted(
-                            SessionStarted(
+                        .sessionCompleted(
+                            SessionCompleted(
                                 sessionID: current.sessionID,
-                                title: current.sessionTitle,
-                                tool: .deepseekHarness,
-                                origin: .live,
-                                initialPhase: .running,
-                                summary: current.runningSummary,
-                                timestamp: .now,
-                                jumpTarget: current.defaultJumpTarget
+                                summary: current.completedSummary,
+                                timestamp: .now
                             )
                         )
                     )
