@@ -633,6 +633,75 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func deepSeekDesktopProcessKeepsStorageObservedSessionAliveForLaterCompletion() {
+        let now = Date.now
+        let discovery = ActiveAgentProcessDiscovery { executablePath, arguments in
+            if executablePath == "/bin/ps" {
+                return """
+                  22535 1 ?? /Applications/Deepseek Harness Desktop.app/Contents/MacOS/deepseek-harness-desktop
+                """
+            }
+
+            guard executablePath == "/usr/sbin/lsof",
+                  arguments.dropFirst(2).first == "22535" else {
+                return nil
+            }
+
+            return """
+            fcwd
+            n/
+            """
+        }
+        let activeProcesses = discovery.discover()
+        let model = AppModel()
+        model.isResolvingInitialLiveSessions = false
+        model.state = SessionState(sessions: [
+            AgentSession(
+                id: "deepseek-desktop-session",
+                title: "DeepSeek · Desktop task",
+                tool: .deepseekHarness,
+                origin: .live,
+                attachmentState: .attached,
+                phase: .running,
+                summary: "DeepSeek is working on Desktop task.",
+                updatedAt: now,
+                jumpTarget: JumpTarget(
+                    terminalApp: "DeepSeek Harness",
+                    workspaceName: "desktop-task",
+                    paneTitle: "Desktop task",
+                    workingDirectory: "/tmp/desktop-task"
+                )
+            ),
+        ])
+
+        model.monitoring.reconcileSessionAttachments(
+            activeProcesses: activeProcesses,
+            ghosttyAvailability: .available([], appIsRunning: false),
+            terminalAvailability: .available([], appIsRunning: false),
+            preResolvedJumpTargets: [:],
+            observedCodexAppRunning: false
+        )
+
+        #expect(activeProcesses.count == 1)
+        #expect(model.state.session(id: "deepseek-desktop-session")?.isProcessAlive == true)
+        #expect(model.state.session(id: "deepseek-desktop-session")?.isVisibleInIsland == true)
+
+        model.applyTrackedEvent(
+            .sessionCompleted(
+                SessionCompleted(
+                    sessionID: "deepseek-desktop-session",
+                    summary: "DeepSeek completed task.",
+                    timestamp: now.addingTimeInterval(1)
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .rollout
+        )
+
+        #expect(model.state.session(id: "deepseek-desktop-session")?.phase == .completed)
+    }
+
+    @Test
     func bridgeNotificationIsSuppressedWhenSessionIsAlreadyFrontmost() async throws {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel(

@@ -68,10 +68,14 @@ struct ActiveAgentProcessDiscovery {
 
         for process in processes {
             // Most agent detection requires a TTY (terminal-attached process).
-            // OpenCode is an exception: it can run inside IDE integrated terminals
-            // that don't expose a TTY in `ps` output. Let OpenCode processes
-            // through so the liveness fallback can keep their sessions alive.
-            if process.terminalTTY == nil && !isOpenCodeProcess(command: process.command) {
+            // OpenCode can run inside IDE integrated terminals, while DeepSeek
+            // Harness runs as a standalone desktop process. Neither necessarily
+            // exposes a TTY in `ps`, so both must reach their tool-specific
+            // detection before liveness reconciliation.
+            if process.terminalTTY == nil
+                && !isOpenCodeProcess(command: process.command)
+                && !isDeepSeekProcess(command: process.command)
+            {
                 continue
             }
 
@@ -790,8 +794,21 @@ struct ActiveAgentProcessDiscovery {
     /// Matches the `dsh` CLI binary and npm/npx package runners invoking `@deepseek-ai/dsh`.
     private func isDeepSeekProcess(command: String) -> Bool {
         let lowered = command.lowercased()
+
+        // The installed app bundle contains spaces, so its executable path
+        // cannot be identified reliably from the command's first token.
+        if lowered.contains(".app/contents/macos/deepseek-harness-desktop") {
+            return true
+        }
+
         guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
             return false
+        }
+
+        // Also support an unbundled desktop executable with the same name.
+        let binaryName = (firstToken as NSString).lastPathComponent
+        if binaryName == "deepseek-harness-desktop" {
+            return true
         }
 
         // Direct dsh binary
