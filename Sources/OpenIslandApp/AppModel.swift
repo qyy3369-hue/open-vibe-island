@@ -142,6 +142,11 @@ final class AppModel {
     var kimiHookStatus: KimiHookInstallationStatus? { hooks.kimiHookStatus }
     var kimiHookStatusTitle: String { hooks.kimiHookStatusTitle }
     var kimiHookStatusSummary: String { hooks.kimiHookStatusSummary }
+    var deepseekHooksInstalled: Bool { hooks.deepseekHooksInstalled }
+    var isDeepSeekHookSetupBusy: Bool { hooks.isDeepSeekHookSetupBusy }
+    var deepseekHookStatus: DeepSeekHookInstallationStatus? { hooks.deepseekHookStatus }
+    var deepseekHookStatusTitle: String { hooks.deepseekHookStatusTitle }
+    var deepseekHookStatusSummary: String { hooks.deepseekHookStatusSummary }
     var codexHookStatusTitle: String { hooks.codexHookStatusTitle }
     var codexHookStatusSummary: String { hooks.codexHookStatusSummary }
 
@@ -169,6 +174,7 @@ final class AppModel {
             || hooks.geminiHooksInstalled
             || hooks.antigravityHooksInstalled
             || hooks.kimiHooksInstalled
+            || hooks.deepseekHooksInstalled
     }
     func refreshCodexHookStatus() { hooks.refreshCodexHookStatus() }
     func refreshClaudeHookStatus() { hooks.refreshClaudeHookStatus() }
@@ -202,6 +208,9 @@ final class AppModel {
     func refreshKimiHookStatus() { hooks.refreshKimiHookStatus() }
     func installKimiHooks() { hooks.installKimiHooks() }
     func uninstallKimiHooks() { hooks.uninstallKimiHooks() }
+    func refreshDeepSeekHookStatus() { hooks.refreshDeepSeekHookStatus() }
+    func installDeepSeekHooks() { hooks.installDeepSeekHooks() }
+    func uninstallDeepSeekHooks() { hooks.uninstallDeepSeekHooks() }
     func installClaudeUsageBridge() { hooks.installClaudeUsageBridge() }
     func uninstallClaudeUsageBridge() { hooks.uninstallClaudeUsageBridge() }
     func updateClaudeConfigDirectory(to newDirectory: URL?) { hooks.updateClaudeConfigDirectory(to: newDirectory) }
@@ -1659,6 +1668,7 @@ final class AppModel {
                 if self.hooks.shouldAutoInstall(.gemini) { self.installGeminiHooks() }
                 if self.hooks.shouldAutoInstall(.antigravity) { self.installAntigravityHooks() }
                 if self.hooks.shouldAutoInstall(.kimi) { self.installKimiHooks() }
+                if self.hooks.shouldAutoInstall(.deepseek) { self.installDeepSeekHooks() }
                 if self.hooks.shouldAutoInstall(.claudeUsageBridge) { self.installClaudeUsageBridge() }
 
                 // Run health checks after install to detect stale paths, conflicts, etc.

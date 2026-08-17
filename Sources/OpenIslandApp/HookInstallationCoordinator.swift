@@ -23,6 +23,7 @@ final class HookInstallationCoordinator {
     var geminiHookStatus: GeminiHookInstallationStatus?
     var antigravityHookStatus: AntigravityHookInstallationStatus?
     var kimiHookStatus: KimiHookInstallationStatus?
+    var deepseekHookStatus: DeepSeekHookInstallationStatus?
     var claudeStatusLineStatus: ClaudeStatusLineInstallationStatus?
     var claudeUsageSnapshot: ClaudeUsageSnapshot?
     var codexUsageSnapshot: CodexUsageSnapshot?
@@ -38,6 +39,7 @@ final class HookInstallationCoordinator {
     var isGeminiHookSetupBusy = false
     var isAntigravityHookSetupBusy = false
     var isKimiHookSetupBusy = false
+    var isDeepSeekHookSetupBusy = false
     var isClaudeUsageSetupBusy = false
 
     @ObservationIgnored
@@ -89,6 +91,9 @@ final class HookInstallationCoordinator {
 
     @ObservationIgnored
     private let kimiHookInstallationManager = KimiHookInstallationManager()
+
+    @ObservationIgnored
+    private let deepseekHookInstallationManager = DeepSeekHookInstallationManager()
 
     /// Computed so it always reflects the latest `ClaudeConfigDirectory` setting.
     private var claudeStatusLineInstallationManager: ClaudeStatusLineInstallationManager {
@@ -152,6 +157,10 @@ final class HookInstallationCoordinator {
 
     var kimiHooksInstalled: Bool {
         kimiHookStatus?.managedHooksPresent == true
+    }
+
+    var deepseekHooksInstalled: Bool {
+        deepseekHookStatus?.managedHooksPresent == true
     }
 
     var claudeUsageInstalled: Bool {
@@ -372,6 +381,21 @@ final class HookInstallationCoordinator {
             return "Build OpenIslandHooks before installing."
         }
         return status.managedHooksPresent ? "managed task lifecycle hooks present" : "no managed Antigravity hooks"
+    }
+
+    var deepseekHookStatusTitle: String {
+        guard let status = deepseekHookStatus else { return "DeepSeek hooks loading" }
+        return status.managedHooksPresent ? "DeepSeek hooks installed" : "DeepSeek hooks not installed"
+    }
+
+    var deepseekHookStatusSummary: String {
+        guard let status = deepseekHookStatus else {
+            return "Reading ~/.dsh/profiles/web/cordis.patch.yml."
+        }
+        if hooksBinaryURL == nil {
+            return "Build OpenIslandHooks before installing."
+        }
+        return status.managedHooksPresent ? "managed task lifecycle hooks present" : "no managed DeepSeek Harness hooks"
     }
 
     var kimiHookStatusTitle: String {
@@ -724,6 +748,16 @@ final class HookInstallationCoordinator {
                     self.onStatusMessage?("Failed to read Kimi hook status: \(error.localizedDescription)")
                 }
             }
+
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let status = try self.deepseekHookInstallationManager.status(hooksBinaryURL: self.hooksBinaryURL)
+                    self.deepseekHookStatus = status
+                } catch {
+                    self.onStatusMessage?("Failed to read DeepSeek hook status: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -787,6 +821,19 @@ final class HookInstallationCoordinator {
                 self.kimiHookStatus = status
             } catch {
                 self.onStatusMessage?("Failed to read Kimi hook status: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func refreshDeepSeekHookStatus() {
+        Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let status = try self.deepseekHookInstallationManager.status(hooksBinaryURL: self.hooksBinaryURL)
+                self.deepseekHookStatus = status
+            } catch {
+                self.onStatusMessage?("Failed to read DeepSeek hook status: \(error.localizedDescription)")
             }
         }
     }
@@ -862,6 +909,7 @@ final class HookInstallationCoordinator {
         case .openCode: return !openCodePluginInstalled
         case .gemini: return !geminiHooksInstalled
         case .kimi: return !kimiHooksInstalled
+        case .deepseek: return !deepseekHooksInstalled
         case .claudeUsageBridge: return !claudeUsageInstalled
         }
     }
@@ -887,6 +935,7 @@ final class HookInstallationCoordinator {
             case .openCode: return openCodePluginInstalled
             case .gemini: return geminiHooksInstalled
             case .kimi: return kimiHooksInstalled
+            case .deepseek: return deepseekHooksInstalled
             case .claudeUsageBridge: return claudeUsageInstalled
             }
         }
@@ -1111,6 +1160,23 @@ final class HookInstallationCoordinator {
 
     func uninstallKimiHooks() {
         updateKimiHooks(userMessage: "Removing Kimi hooks.", intent: .uninstalled) { manager in
+            try manager.uninstall()
+        }
+    }
+
+    func installDeepSeekHooks() {
+        guard let hooksBinaryURL else {
+            onStatusMessage?("Could not find a local OpenIslandHooks binary. Build the package first.")
+            return
+        }
+
+        updateDeepSeekHooks(userMessage: "Installing DeepSeek Harness hooks.", intent: .installed) { manager in
+            try manager.install(hooksBinaryURL: hooksBinaryURL)
+        }
+    }
+
+    func uninstallDeepSeekHooks() {
+        updateDeepSeekHooks(userMessage: "Removing DeepSeek Harness hooks.", intent: .uninstalled) { manager in
             try manager.uninstall()
         }
     }
@@ -1350,6 +1416,34 @@ final class HookInstallationCoordinator {
                 }
             } catch {
                 self.onStatusMessage?("Kimi hook update failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func updateDeepSeekHooks(
+        userMessage: String,
+        intent: AgentHookIntent,
+        operation: @escaping (DeepSeekHookInstallationManager) throws -> DeepSeekHookInstallationStatus
+    ) {
+        isDeepSeekHookSetupBusy = true
+        onStatusMessage?(userMessage)
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            defer { self.isDeepSeekHookSetupBusy = false }
+
+            do {
+                let status = try operation(self.deepseekHookInstallationManager)
+                self.deepseekHookStatus = status
+                self.intentStore.setIntent(intent, for: .deepseek)
+                if status.managedHooksPresent {
+                    self.onStatusMessage?("DeepSeek Harness hooks are installed and ready.")
+                } else {
+                    self.onStatusMessage?("DeepSeek Harness hooks are not installed.")
+                }
+            } catch {
+                self.onStatusMessage?("DeepSeek Harness hook update failed: \(error.localizedDescription)")
             }
         }
     }

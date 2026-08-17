@@ -419,6 +419,7 @@ struct SetupSettingsPane: View {
     @State private var confirmingUninstallGemini = false
     @State private var confirmingUninstallAntigravity = false
     @State private var confirmingUninstallKimi = false
+    @State private var confirmingUninstallDeepSeek = false
     @State private var confirmingUninstallClaudeUsage = false
 
     private var lang: LanguageManager { model.lang }
@@ -620,6 +621,23 @@ struct SetupSettingsPane: View {
                 } message: {
                     Text("This will remove Open Island hooks from ~/.kimi/config.toml.")
                 }
+
+                hookRow(
+                    name: "DeepSeek Harness",
+                    installed: model.deepseekHooksInstalled,
+                    busy: model.isDeepSeekHookSetupBusy,
+                    configLocationURL: model.deepseekHookStatus?.configFileURL,
+                    installAction: { model.installDeepSeekHooks() },
+                    uninstallAction: { confirmingUninstallDeepSeek = true }
+                )
+                .alert(lang.t("settings.general.uninstallConfirmTitle"), isPresented: $confirmingUninstallDeepSeek) {
+                    Button(lang.t("settings.general.uninstallConfirmAction"), role: .destructive) {
+                        model.uninstallDeepSeekHooks()
+                    }
+                    Button(lang.t("settings.general.cancel"), role: .cancel) {}
+                } message: {
+                    Text("This will remove Open Island hooks from ~/.dsh/profiles/web/cordis.patch.yml.")
+                }
             }
 
             Section {
@@ -698,6 +716,7 @@ struct SetupSettingsPane: View {
                     if !model.geminiHooksInstalled { model.installGeminiHooks() }
                     if !model.antigravityHooksInstalled { model.installAntigravityHooks() }
                     if !model.kimiHooksInstalled { model.installKimiHooks() }
+                    if !model.deepseekHooksInstalled { model.installDeepSeekHooks() }
                     if !model.claudeUsageInstalled { model.installClaudeUsageBridge() }
                 }
                 .disabled(model.hooksBinaryURL == nil || allReady)
@@ -760,7 +779,7 @@ struct SetupSettingsPane: View {
         model.claudeHooksInstalled && model.codexHooksInstalled && model.openCodePluginInstalled
             && model.qoderHooksInstalled && model.qwenCodeHooksInstalled && model.factoryHooksInstalled && model.codebuddyHooksInstalled
             && model.cursorHooksInstalled && model.geminiHooksInstalled && model.antigravityHooksInstalled
-            && model.kimiHooksInstalled && model.claudeUsageInstalled
+            && model.kimiHooksInstalled && model.deepseekHooksInstalled && model.claudeUsageInstalled
     }
 
     @ViewBuilder

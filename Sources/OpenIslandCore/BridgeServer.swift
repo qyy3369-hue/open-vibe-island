@@ -466,6 +466,9 @@ public final class BridgeServer: @unchecked Sendable {
         case let .processCursorHook(payload):
             handleCursorHook(payload, from: clientID)
 
+        case let .processGeminiHook(payload):
+            handleGeminiHook(payload, from: clientID)
+
         case let .processAntigravityHook(payload):
             handleAntigravityHook(payload, from: clientID)
 

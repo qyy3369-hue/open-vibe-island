@@ -1469,6 +1469,8 @@ private struct IslandSessionRow: View {
             "qwen"
         case .kimiCLI:
             "kimi"
+        case .deepseekHarness:
+            "deepseek"
         default:
             session.tool.shortName.lowercased()
         }

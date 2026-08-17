@@ -229,8 +229,6 @@ extension AgentSession {
             return "Cursor"
         case .kimiCLI:
             return "Kimi"
-        case .antigravity:
-            return "Antigravity"
         case .deepseekHarness:
             return "DeepSeek"
         }

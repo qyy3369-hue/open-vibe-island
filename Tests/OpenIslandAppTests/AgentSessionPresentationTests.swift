@@ -112,6 +112,7 @@ struct AgentSessionPresentationTests {
             (.codebuddy, "CodeBuddy"),
             (.cursor, "Cursor"),
             (.kimiCLI, "Kimi"),
+            (.deepseekHarness, "DeepSeek"),
         ]
         #expect(expectedNames.map { $0.0.rawValue }.sorted() == AgentTool.allCases.map(\.rawValue).sorted())
 
