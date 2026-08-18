@@ -1432,28 +1432,19 @@ public final class BridgeServer: @unchecked Sendable {
             )
 
         case .stop:
-            if payload.fullyIdle != true {
-                emit(
-                    .activityUpdated(
-                        SessionActivityUpdated(
-                            sessionID: payload.conversationID,
-                            summary: "Antigravity still has background tasks in \(payload.workspaceName).",
-                            phase: .running,
-                            timestamp: .now
-                        )
+            // Stop means the Antigravity execution loop has terminated. The
+            // fullyIdle flag only describes whether detached/background work
+            // may remain; it does not mean the agent conversation is still
+            // running, and Antigravity does not promise a later Stop event.
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.conversationID,
+                        summary: payload.stoppedSummary,
+                        timestamp: .now
                     )
                 )
-            } else {
-                emit(
-                    .sessionCompleted(
-                        SessionCompleted(
-                            sessionID: payload.conversationID,
-                            summary: payload.stoppedSummary,
-                            timestamp: .now
-                        )
-                    )
-                )
-            }
+            )
         }
 
         send(.response(.acknowledged), to: clientID)

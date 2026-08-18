@@ -515,7 +515,7 @@ final class ProcessMonitoringCoordinator {
         // Antigravity 2.0 is a standalone desktop manager. Its JSON hooks
         // expose conversation IDs, but there is no corresponding child PID
         // to match. Keep hook-managed conversations alive while the app is
-        // running, expiring completed cards or stalled running cards after a timeout.
+        // running. Completed cards remain briefly visible, then age out.
         let isAntigravityRunning = Self.isAntigravityRunning()
         if isAntigravityRunning {
             for session in sessions where session.tool == .antigravity && !session.isDemoSession {

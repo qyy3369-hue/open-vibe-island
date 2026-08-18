@@ -165,7 +165,7 @@ struct AntigravityHooksTests {
     }
 
     @Test
-    func nonIdleStopEmitsActivityUpdatedAndKeepsRunning() async throws {
+    func nonIdleStopCompletesConversationAndReportsBackgroundWork() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
         try server.start()
@@ -205,19 +205,35 @@ struct AntigravityHooksTests {
         }
         #expect(startPayload.sessionID == "antigravity-session-running")
 
-        let nonIdleActivity = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
-            if case let .activityUpdated(update) = $0, update.summary.contains("still has background tasks") {
-                return true
-            }
+        let completed = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
+            if case .sessionCompleted = $0 { return true }
             return false
         }
-        guard case let .activityUpdated(activity) = nonIdleActivity else {
-            Issue.record("Expected activity update for non-idle stop")
+        guard case let .sessionCompleted(completion) = completed else {
+            Issue.record("Expected completion for non-idle stop")
+            return
+        }
+        #expect(completion.sessionID == "antigravity-session-running")
+        #expect(completion.summary == "Antigravity finished the task in worktree; background work may still be active.")
+
+        let resumedPayload = AntigravityHookPayload(
+            conversationID: "antigravity-session-running",
+            workspacePaths: ["/tmp/worktree"],
+            invocationNum: 1,
+            hookEventName: .preInvocation
+        )
+        _ = try BridgeCommandClient(socketURL: socketURL).send(.processAntigravityHook(resumedPayload))
+
+        let resumed = try await nextAntigravityEvent(from: &iterator, maxEvents: 6) {
+            if case let .activityUpdated(update) = $0, update.phase == .running { return true }
+            return false
+        }
+        guard case let .activityUpdated(activity) = resumed else {
+            Issue.record("Expected a later invocation to resume the conversation")
             return
         }
         #expect(activity.sessionID == "antigravity-session-running")
         #expect(activity.phase == .running)
-        #expect(activity.summary == "Antigravity still has background tasks in worktree.")
     }
 }
 

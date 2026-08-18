@@ -38,7 +38,7 @@ The managed installer writes one isolated hook definition named `open-island-tas
 | Event | Island phase | Completion rule |
 |---|---|---|
 | `PreInvocation` | `running` | First model invocation creates the Antigravity session; later invocations refresh it |
-| `Stop` with `fullyIdle: false` | `running` | Background commands or asynchronous tasks are still active |
+| `Stop` with `fullyIdle: false` | `completed` | The agent execution loop has ended; the summary notes that detached background work may remain |
 | `Stop` with `fullyIdle: true` | `completed` | The agent and all background work are finished |
 
 Antigravity supplies the conversation UUID, workspace paths, transcript path, model name, termination reason, and `fullyIdle` directly in the official JSON hook payload. Open Island does not parse Antigravity's private SQLite conversation database.
