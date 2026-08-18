@@ -546,7 +546,8 @@ public extension CodexHookPayload {
             environment: environment,
             currentTTYProvider: { currentTTY() },
             terminalLocatorProvider: { terminalLocator(for: $0) },
-            warpPaneResolver: Self.defaultWarpPaneResolver
+            warpPaneResolver: Self.defaultWarpPaneResolver,
+            ancestorCommandsProvider: nil
         )
     }
 
@@ -569,12 +570,16 @@ public extension CodexHookPayload {
         environment: [String: String],
         currentTTYProvider: () -> String?,
         terminalLocatorProvider: (String) -> (sessionID: String?, tty: String?, title: String?),
-        warpPaneResolver: (String) -> String? = Self.defaultWarpPaneResolver
+        warpPaneResolver: (String) -> String? = Self.defaultWarpPaneResolver,
+        ancestorCommandsProvider: (() -> [String])? = nil
     ) -> CodexHookPayload {
         var payload = self
 
         if payload.terminalApp == nil {
-            payload.terminalApp = inferTerminalApp(from: environment)
+            payload.terminalApp = inferTerminalApp(
+                from: environment,
+                ancestorCommandsProvider: ancestorCommandsProvider ?? { payload.ancestorProcessCommands() }
+            )
         }
 
         if payload.terminalApp == "Warp", payload.warpPaneUUID == nil {
@@ -665,7 +670,10 @@ public extension CodexHookPayload {
         terminalApp?.lowercased() == "zellij"
     }
 
-    private func inferTerminalApp(from environment: [String: String]) -> String? {
+    private func inferTerminalApp(
+        from environment: [String: String],
+        ancestorCommandsProvider: (() -> [String])? = nil
+    ) -> String? {
         // Multiplexers run inside a host terminal but expose their own pane
         // context. Detect them first so the captured jumpTarget points at
         // the multiplexer pane instead of the outer terminal.
@@ -754,7 +762,71 @@ public extension CodexHookPayload {
             return "IntelliJ IDEA"
         }
 
+        // Fallback: Codex Desktop subprocess check from ancestor process commands.
+        // When Codex Desktop launches the hook, environment variables like __CFBundleIdentifier
+        // and TERM_PROGRAM may be missing. Inspect ancestor process commands lazily to match official
+        // Codex Desktop / ChatGPT.app bundles.
+        if let provider = ancestorCommandsProvider {
+            let ancestorCommands = provider()
+            if let codexApp = inferCodexDesktopApp(from: ancestorCommands) {
+                return codexApp
+            }
+        }
+
         return nil
+    }
+
+    private func inferCodexDesktopApp(from ancestorCommands: [String]) -> String? {
+        for command in ancestorCommands {
+            if isCodexDesktopAppCommand(command) {
+                return "Codex.app"
+            }
+        }
+        return nil
+    }
+
+    private func isCodexDesktopAppCommand(_ command: String) -> Bool {
+        let lower = command.lowercased()
+        if lower.contains("/chatgpt.app/contents/resources/codex") {
+            return true
+        }
+        if lower.contains("/codex.app/contents/resources/codex")
+            || lower.contains("/codex.app/contents/macos/codex") {
+            return true
+        }
+        return false
+    }
+
+    private func ancestorProcessCommands(maxDepth: Int = 16) -> [String] {
+        var currentPID = String(getppid())
+        var visited: Set<String> = []
+        var commands: [String] = []
+
+        while commands.count < maxDepth,
+              !currentPID.isEmpty,
+              let pidNum = Int(currentPID),
+              pidNum > 1,
+              visited.insert(currentPID).inserted {
+            guard let raw = commandOutput(executablePath: "/bin/ps", arguments: ["-p", currentPID, "-o", "ppid=,command="]) else {
+                break
+            }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                break
+            }
+            let components = trimmed.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+            guard !components.isEmpty else {
+                break
+            }
+            let ppid = String(components[0])
+            let command = components.count > 1 ? String(components[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            if !command.isEmpty {
+                commands.append(command)
+            }
+            currentPID = ppid
+        }
+
+        return commands
     }
 
     private func currentTTY() -> String? {
