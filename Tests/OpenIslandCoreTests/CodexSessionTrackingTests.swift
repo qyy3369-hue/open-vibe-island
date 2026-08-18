@@ -30,6 +30,7 @@ struct CodexSessionTrackingTests {
                 ),
                 codexMetadata: CodexSessionMetadata(
                     transcriptPath: "/tmp/rollout.jsonl",
+                    threadName: "Fix rollout tracking",
                     initialUserPrompt: "Start by checking the rollout watcher.",
                     lastUserPrompt: "Check the rollout watcher state.",
                     lastAssistantMessage: "Inspecting rollout watcher.",
@@ -44,10 +45,32 @@ struct CodexSessionTrackingTests {
 
         #expect(reloaded == records)
         #expect(reloaded.first?.session.codexMetadata?.transcriptPath == "/tmp/rollout.jsonl")
+        #expect(reloaded.first?.session.codexMetadata?.threadName == "Fix rollout tracking")
         #expect(reloaded.first?.session.codexMetadata?.initialUserPrompt == "Start by checking the rollout watcher.")
         #expect(reloaded.first?.session.codexMetadata?.lastUserPrompt == "Check the rollout watcher state.")
         #expect(reloaded.first?.session.origin == .live)
         #expect(reloaded.first?.session.attachmentState == .attached)
+    }
+
+    @Test
+    func codexThreadNameIndexUsesLatestValidSidebarName() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-thread-index-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = rootURL.appendingPathComponent("session_index.jsonl")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let contents = """
+        {"id":"thread-1","thread_name":"Old title"}
+        malformed
+        {"id":"thread-2","thread_name":"Second title"}
+        {"id":"thread-1","thread_name":"Renamed title"}
+        """
+        try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let names = CodexThreadNameIndex.threadNames(fileURL: fileURL)
+
+        #expect(names == ["thread-1": "Renamed title", "thread-2": "Second title"])
     }
 
     @Test
@@ -791,7 +814,11 @@ struct CodexSessionTrackingTests {
                     "content": [
                         [
                             "type": "input_text",
-                            "text": "# AGENTS.md instructions for /tmp/repo\n\n<INSTRUCTIONS>\nRepository guide\n</INSTRUCTIONS>",
+                            "text": "<recommended_plugins>\nHere is a list of plugins that are available but not installed.\n</recommended_plugins>",
+                        ],
+                        [
+                            "type": "input_text",
+                            "text": "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nRepository guide\n</INSTRUCTIONS>",
                         ],
                         [
                             "type": "input_text",
@@ -809,9 +836,25 @@ struct CodexSessionTrackingTests {
                     "content": [
                         [
                             "type": "input_text",
-                            "text": "读一下这篇论文 https://arxiv.org/html/2603.28052v1，然后对比一下 autoresearch 的实现。",
+                            "text": "# Chrome tabs:\n- Current URL: https://arxiv.org/html/2603.28052v1\n\n## My request for Codex:\n读一下这篇论文 https://arxiv.org/html/2603.28052v1，然后对比一下 autoresearch 的实现。",
+                        ],
+                        [
+                            "type": "input_text",
+                            "text": "<image name=[Image #1] path=\"/tmp/paper.png\">",
+                        ],
+                        [
+                            "type": "input_text",
+                            "text": "</image>",
                         ],
                     ],
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T14:37:28.500Z",
+                type: "event_msg",
+                payload: [
+                    "type": "user_message",
+                    "message": "# Files mentioned by the user:\n\n## paper.png: /tmp/paper.png\n\n## My request for Codex:\n读一下这篇论文 https://arxiv.org/html/2603.28052v1，然后对比一下 autoresearch 的实现。",
                 ]
             ),
             rolloutLine(
@@ -1116,6 +1159,7 @@ struct CodexSessionTrackingTests {
         let staleDirectoryURL = rootURL.appendingPathComponent("2026/03/30", isDirectory: true)
         let recentRolloutURL = recentDirectoryURL.appendingPathComponent("rollout-recent.jsonl")
         let staleRolloutURL = staleDirectoryURL.appendingPathComponent("rollout-stale.jsonl")
+        let threadNameIndexURL = rootURL.appendingPathComponent("session_index.jsonl")
         let now = Date(timeIntervalSince1970: 1_743_555_200)
 
         try FileManager.default.createDirectory(at: recentDirectoryURL, withIntermediateDirectories: true)
@@ -1167,11 +1211,14 @@ struct CodexSessionTrackingTests {
 
         try recentLines.joined(separator: "\n").appending("\n").write(to: recentRolloutURL, atomically: true, encoding: .utf8)
         try staleLines.joined(separator: "\n").appending("\n").write(to: staleRolloutURL, atomically: true, encoding: .utf8)
+        try "{\"id\":\"codex-session-1\",\"thread_name\":\"Inspect rollout discovery\"}\n"
+            .write(to: threadNameIndexURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: recentRolloutURL.path)
         try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-172_800)], ofItemAtPath: staleRolloutURL.path)
 
         let discovery = CodexRolloutDiscovery(
             rootURL: rootURL,
+            threadNameIndexURL: threadNameIndexURL,
             fileManager: .default,
             maxAge: 86_400,
             maxFiles: 10
@@ -1181,7 +1228,7 @@ struct CodexSessionTrackingTests {
 
         #expect(records.count == 1)
         #expect(records.first?.sessionID == "codex-session-1")
-        #expect(records.first?.title == "Codex · open-island")
+        #expect(records.first?.title == "Inspect rollout discovery")
         #expect(records.first?.summary == "Inspecting the local rollout files.")
         #expect(records.first?.phase == .running)
         #expect(
@@ -1190,11 +1237,21 @@ struct CodexSessionTrackingTests {
             } == recentRolloutURL.resolvingSymlinksInPath().path
         )
         #expect(records.first?.codexMetadata?.lastAssistantMessage == "Inspecting the local rollout files.")
+        #expect(records.first?.codexMetadata?.threadName == "Inspect rollout discovery")
         #expect(records.first?.codexMetadata?.lastUserPrompt == "Inspect the local rollout files.")
         #expect(records.first?.codexMetadata?.currentTool == nil)
         #expect(records.first?.codexMetadata?.currentCommandPreview == nil)
         #expect(records.first?.origin == .live)
         #expect(records.first?.attachmentState == .stale)
+
+        try "{\"id\":\"codex-session-1\",\"thread_name\":\"Renamed cached rollout\"}\n"
+            .write(to: threadNameIndexURL, atomically: true, encoding: .utf8)
+
+        let renamedRecords = discovery.discoverRecentSessions(now: now)
+
+        #expect(discovery.lastScanDiagnostics.cacheHitCount == 1)
+        #expect(renamedRecords.first?.title == "Renamed cached rollout")
+        #expect(renamedRecords.first?.codexMetadata?.threadName == "Renamed cached rollout")
     }
 
     @Test
@@ -1275,6 +1332,66 @@ struct CodexSessionTrackingTests {
         #expect(records.first?.summary == "Streamed the large rollout end-to-end.")
         #expect(records.first?.codexMetadata?.lastUserPrompt == "Inspect the large rollout.")
         #expect(records.first?.codexMetadata?.lastAssistantMessage == "Streamed the large rollout end-to-end.")
+    }
+
+    @Test
+    func codexRolloutDiscoveryHandlesSingleLineSpanningManyReadChunks() throws {
+        // Codex rollouts can embed large tool results or context in one JSON
+        // object. Keep this as one multi-megabyte line so the streaming
+        // reader must carry an unfinished line across many 64 KB chunks.
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-island-discovery-long-line-\(UUID().uuidString)", isDirectory: true)
+        let rolloutDirectoryURL = rootURL.appendingPathComponent("2026/04/02", isDirectory: true)
+        let rolloutURL = rolloutDirectoryURL.appendingPathComponent("rollout-long-line.jsonl")
+        let now = Date(timeIntervalSince1970: 1_743_555_200)
+
+        try FileManager.default.createDirectory(at: rolloutDirectoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let oversizedLine = rolloutLine(
+            timestamp: "2026-04-02T04:03:45.000Z",
+            type: "event_msg",
+            payload: [
+                "type": "token_count",
+                "padding": String(repeating: "x", count: 2 * 1_024 * 1_024),
+            ]
+        )
+        let finalLine = rolloutLine(
+            timestamp: "2026-04-02T04:03:46.000Z",
+            type: "event_msg",
+            payload: [
+                "type": "agent_message",
+                "message": "Parsed after the oversized line.",
+            ]
+        )
+        let body = [
+            sessionMetaLine(
+                sessionID: "codex-session-long-line",
+                timestamp: "2026-04-02T04:03:44.000Z",
+                cwd: "/Users/wangruobing/Personal/open-island"
+            ),
+            oversizedLine,
+            finalLine,
+        ].joined(separator: "\n").appending("\n")
+
+        try body.write(to: rolloutURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: rolloutURL.path)
+
+        let fileSize = (try FileManager.default.attributesOfItem(atPath: rolloutURL.path)[.size] as? Int) ?? 0
+        #expect(fileSize > 32 * 64 * 1_024)
+
+        let discovery = CodexRolloutDiscovery(
+            rootURL: rootURL,
+            fileManager: .default,
+            maxAge: 86_400,
+            maxFiles: 10
+        )
+
+        let records = discovery.discoverRecentSessions(now: now)
+
+        #expect(records.count == 1)
+        #expect(records.first?.sessionID == "codex-session-long-line")
+        #expect(records.first?.codexMetadata?.lastAssistantMessage == "Parsed after the oversized line.")
     }
 
     @Test

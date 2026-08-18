@@ -68,10 +68,14 @@ struct ActiveAgentProcessDiscovery {
 
         for process in processes {
             // Most agent detection requires a TTY (terminal-attached process).
-            // OpenCode is an exception: it can run inside IDE integrated terminals
-            // that don't expose a TTY in `ps` output. Let OpenCode processes
-            // through so the liveness fallback can keep their sessions alive.
-            if process.terminalTTY == nil && !isOpenCodeProcess(command: process.command) {
+            // OpenCode can run inside IDE integrated terminals, while DeepSeek
+            // Harness runs as a standalone desktop process. Neither necessarily
+            // exposes a TTY in `ps`, so both must reach their tool-specific
+            // detection before liveness reconciliation.
+            if process.terminalTTY == nil
+                && !isOpenCodeProcess(command: process.command)
+                && !isDeepSeekProcess(command: process.command)
+            {
                 continue
             }
 
@@ -208,6 +212,23 @@ struct ActiveAgentProcessDiscovery {
                 let lsofOutput = lsofOutput(pid: process.pid)
                 snapshots.append(ProcessSnapshot(
                     tool: .kimiCLI,
+                    sessionID: nil,
+                    workingDirectory: lsofOutput.flatMap(workingDirectory(from:)),
+                    terminalTTY: process.terminalTTY,
+                    terminalApp: terminalApp(for: process, processesByPID: processesByPID)
+                ))
+                continue
+            }
+
+            if isDeepSeekProcess(command: process.command) {
+                let claimKey = "deepseek:\(process.pid)"
+                guard claimedKeys.insert(claimKey).inserted else {
+                    continue
+                }
+
+                let lsofOutput = lsofOutput(pid: process.pid)
+                snapshots.append(ProcessSnapshot(
+                    tool: .deepseekHarness,
                     sessionID: nil,
                     workingDirectory: lsofOutput.flatMap(workingDirectory(from:)),
                     terminalTTY: process.terminalTTY,
@@ -767,6 +788,53 @@ struct ActiveAgentProcessDiscovery {
         }
 
         return firstToken == "kimi" || firstToken.hasSuffix("/kimi")
+    }
+
+    /// Returns `true` when the given `ps` command string belongs to a DeepSeek Harness process.
+    /// Matches the `dsh` CLI binary and npm/npx package runners invoking `@deepseek-ai/dsh`.
+    private func isDeepSeekProcess(command: String) -> Bool {
+        let lowered = command.lowercased()
+
+        // The installed app bundle contains spaces, so its executable path
+        // cannot be identified reliably from the command's first token.
+        if lowered.contains(".app/contents/macos/deepseek-harness-desktop") {
+            return true
+        }
+
+        guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
+            return false
+        }
+
+        // Also support an unbundled desktop executable with the same name.
+        let binaryName = (firstToken as NSString).lastPathComponent
+        if binaryName == "deepseek-harness-desktop" {
+            return true
+        }
+
+        // Direct dsh binary
+        if firstToken == "dsh" || firstToken.hasSuffix("/dsh") {
+            return true
+        }
+
+        // Node/npx runners with @deepseek-ai/dsh
+        guard lowered.contains("dsh") || lowered.contains("deepseek") else {
+            return false
+        }
+
+        let isPackageRunner = firstToken == "npx" || firstToken.hasSuffix("/npx")
+            || firstToken == "bunx" || firstToken.hasSuffix("/bunx")
+            || firstToken == "pnpx" || firstToken.hasSuffix("/pnpx")
+        if isPackageRunner && (lowered.contains("@deepseek-ai/dsh") || lowered.contains("deepseek-harness")) {
+            return true
+        }
+
+        let isNode = firstToken == "node" || firstToken.hasSuffix("/node")
+            || firstToken == "bun" || firstToken.hasSuffix("/bun")
+        if isNode && (lowered.contains("@deepseek-ai/dsh") || lowered.contains("/dsh/") || lowered.contains("deepseek-harness")) {
+            return true
+        }
+
+        return false
     }
 
     /// Returns `true` when the given `ps` command string belongs to a Claude Code process.

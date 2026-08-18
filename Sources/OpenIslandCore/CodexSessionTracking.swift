@@ -3,6 +3,7 @@ import Foundation
 
 public struct CodexSessionMetadata: Equatable, Codable, Sendable {
     public var transcriptPath: String?
+    public var threadName: String?
     public var initialUserPrompt: String?
     public var lastUserPrompt: String?
     public var lastAssistantMessage: String?
@@ -11,6 +12,7 @@ public struct CodexSessionMetadata: Equatable, Codable, Sendable {
 
     public init(
         transcriptPath: String? = nil,
+        threadName: String? = nil,
         initialUserPrompt: String? = nil,
         lastUserPrompt: String? = nil,
         lastAssistantMessage: String? = nil,
@@ -18,6 +20,7 @@ public struct CodexSessionMetadata: Equatable, Codable, Sendable {
         currentCommandPreview: String? = nil
     ) {
         self.transcriptPath = transcriptPath
+        self.threadName = threadName
         self.initialUserPrompt = initialUserPrompt
         self.lastUserPrompt = lastUserPrompt
         self.lastAssistantMessage = lastAssistantMessage
@@ -27,11 +30,56 @@ public struct CodexSessionMetadata: Equatable, Codable, Sendable {
 
     public var isEmpty: Bool {
         transcriptPath == nil
+            && threadName == nil
             && initialUserPrompt == nil
             && lastUserPrompt == nil
             && lastAssistantMessage == nil
             && currentTool == nil
             && currentCommandPreview == nil
+    }
+}
+
+public enum CodexThreadNameIndex: Sendable {
+    private struct Entry: Decodable {
+        var id: String
+        var threadName: String
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case threadName = "thread_name"
+        }
+    }
+
+    public static var defaultFileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/session_index.jsonl")
+    }
+
+    /// Reads Codex's local sidebar-name index without opening the app-server.
+    /// Later entries win so an appended rename replaces an older name.
+    public static func threadNames(
+        fileURL: URL = defaultFileURL,
+        fileManager: FileManager = .default
+    ) -> [String: String] {
+        guard fileManager.fileExists(atPath: fileURL.path),
+              let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return [:]
+        }
+
+        let decoder = JSONDecoder()
+        var names: [String: String] = [:]
+        for line in contents.split(whereSeparator: \.isNewline) {
+            guard let data = String(line).data(using: .utf8),
+                  let entry = try? decoder.decode(Entry.self, from: data) else {
+                continue
+            }
+
+            let id = entry.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = entry.threadName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, !name.isEmpty else { continue }
+            names[id] = name
+        }
+        return names
     }
 }
 
@@ -389,6 +437,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
     }
 
     private let rootURL: URL
+    private let threadNameIndexURL: URL
     private let fileManager: FileManager
     private let maxAge: TimeInterval
     private let maxFiles: Int
@@ -404,11 +453,13 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
     public init(
         rootURL: URL = CodexRolloutDiscovery.defaultRootURL,
+        threadNameIndexURL: URL = CodexThreadNameIndex.defaultFileURL,
         fileManager: FileManager = .default,
         maxAge: TimeInterval = 86_400,
         maxFiles: Int = 40
     ) {
         self.rootURL = rootURL
+        self.threadNameIndexURL = threadNameIndexURL
         self.fileManager = fileManager
         self.maxAge = maxAge
         self.maxFiles = maxFiles
@@ -443,6 +494,10 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         }
 
         let cutoff = now.addingTimeInterval(-maxAge)
+        let threadNames = CodexThreadNameIndex.threadNames(
+            fileURL: threadNameIndexURL,
+            fileManager: fileManager
+        )
         var candidates: [Candidate] = []
 
         for case let fileURL as URL in enumerator {
@@ -493,6 +548,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
                 fileURL: candidate.fileURL,
                 modifiedAt: candidate.modifiedAt,
                 fileSize: candidate.fileSize,
+                threadNames: threadNames,
                 diagnostics: &diagnostics
             ) else {
                 continue
@@ -518,6 +574,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         fileURL: URL,
         modifiedAt: Date,
         fileSize: Int,
+        threadNames: [String: String],
         diagnostics: inout CodexRolloutDiscoveryDiagnostics
     ) -> CodexTrackedSessionRecord? {
         // Rollouts are append-only folds, so parse them incrementally:
@@ -535,7 +592,11 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         if let cached = state, cached.fileSize == fileSize, cached.modifiedAt == modifiedAt {
             diagnostics.cacheHitCount += 1
-            return cached.record
+            return recordByApplyingThreadName(
+                cached.record,
+                sessionMeta: cached.sessionMeta,
+                threadNames: threadNames
+            )
         }
         if let cached = state,
            fileSize < cached.consumedOffset
@@ -569,13 +630,17 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         var buffer = Data()
         var bytesRead = 0
+        var scannedPrefixCount = 0
 
         while let chunk = try? fileHandle.read(upToCount: Self.streamingChunkSize),
               !chunk.isEmpty {
             buffer.append(chunk)
             bytesRead += chunk.count
             diagnostics.bytesRead += chunk.count
-            for line in extractCompleteLines(from: &buffer) {
+            for line in extractCompleteLines(
+                from: &buffer,
+                scannedPrefixCount: &scannedPrefixCount
+            ) {
                 CodexRolloutReducer.apply(line: line, to: &snapshot)
                 if sessionMeta == nil {
                     sessionMeta = parseSessionMeta(fromLine: line)
@@ -606,7 +671,8 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
             fileURL: fileURL,
             modifiedAt: modifiedAt,
             snapshot: recordSnapshot,
-            sessionMeta: recordMeta
+            sessionMeta: recordMeta,
+            threadNames: threadNames
         )
 
         stateLock.lock()
@@ -627,14 +693,17 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         fileURL: URL,
         modifiedAt: Date,
         snapshot: CodexRolloutSnapshot,
-        sessionMeta: SessionMeta?
+        sessionMeta: SessionMeta?,
+        threadNames: [String: String]
     ) -> CodexTrackedSessionRecord? {
         guard let sessionMeta else { return nil }
 
         let summary = snapshot.summary ?? sessionMeta.defaultSummary
         let updatedAt = snapshot.updatedAt ?? sessionMeta.timestamp ?? modifiedAt
+        let threadName = threadNames[sessionMeta.sessionID]
         let metadata = CodexSessionMetadata(
             transcriptPath: fileURL.path,
+            threadName: threadName,
             initialUserPrompt: snapshot.initialUserPrompt,
             lastUserPrompt: snapshot.lastUserPrompt,
             lastAssistantMessage: snapshot.lastAssistantMessage,
@@ -644,7 +713,7 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
 
         return CodexTrackedSessionRecord(
             sessionID: sessionMeta.sessionID,
-            title: sessionMeta.sessionTitle,
+            title: threadName ?? sessionMeta.sessionTitle,
             origin: .live,
             attachmentState: .stale,
             summary: summary,
@@ -652,6 +721,22 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
             updatedAt: updatedAt,
             codexMetadata: metadata
         )
+    }
+
+    private func recordByApplyingThreadName(
+        _ cachedRecord: CodexTrackedSessionRecord?,
+        sessionMeta: SessionMeta?,
+        threadNames: [String: String]
+    ) -> CodexTrackedSessionRecord? {
+        guard var record = cachedRecord else { return nil }
+
+        let threadName = threadNames[record.sessionID]
+        record.title = threadName ?? sessionMeta?.sessionTitle ?? record.title
+
+        var metadata = record.codexMetadata ?? CodexSessionMetadata()
+        metadata.threadName = threadName
+        record.codexMetadata = metadata.isEmpty ? nil : metadata
+        return record
     }
 
     private static let streamingChunkSize = 64 * 1_024
@@ -679,15 +764,43 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         )
     }
 
-    private func extractCompleteLines(from buffer: inout Data) -> [String] {
+    private func extractCompleteLines(
+        from buffer: inout Data,
+        scannedPrefixCount: inout Int
+    ) -> [String] {
         let newline = UInt8(ascii: "\n")
         var lines: [String] = []
-        while let newlineIndex = buffer.firstIndex(of: newline) {
-            let lineData = buffer.prefix(upTo: newlineIndex)
-            buffer.removeSubrange(...newlineIndex)
-            guard !lineData.isEmpty else { continue }
-            lines.append(String(decoding: lineData, as: UTF8.self))
+
+        // A rollout line can span many 64 KB read chunks. Remember how much
+        // of the unfinished line was already searched so each append scans
+        // only new bytes. Restarting `firstIndex` at the beginning on every
+        // chunk made a multi-megabyte JSON line approach quadratic work.
+        var lineStart = buffer.startIndex
+        var searchStart = buffer.index(
+            buffer.startIndex,
+            offsetBy: min(scannedPrefixCount, buffer.count)
+        )
+        var consumedEnd: Data.Index?
+
+        while searchStart < buffer.endIndex,
+              let newlineIndex = buffer[searchStart...].firstIndex(of: newline) {
+            if lineStart < newlineIndex {
+                lines.append(String(decoding: buffer[lineStart..<newlineIndex], as: UTF8.self))
+            }
+
+            let nextLineStart = buffer.index(after: newlineIndex)
+            consumedEnd = nextLineStart
+            lineStart = nextLineStart
+            searchStart = nextLineStart
         }
+
+        // Remove complete lines once per chunk instead of shifting the Data
+        // buffer after every line. The remainder is the one unfinished line.
+        if let consumedEnd {
+            buffer.removeSubrange(buffer.startIndex..<consumedEnd)
+        }
+
+        scannedPrefixCount = buffer.count
         return lines
     }
 }
@@ -860,7 +973,7 @@ public enum CodexRolloutReducer {
             snapshot.isInterrupted = false
             snapshot.summary = snapshot.summary ?? "Codex started a new turn."
         case "user_message":
-            guard let message = clipped(payload["message"] as? String), !message.isEmpty else {
+            guard let message = userPromptText(from: payload["message"] as? String), !message.isEmpty else {
                 break
             }
 
@@ -1473,16 +1586,11 @@ public enum CodexRolloutReducer {
                 return nil
             }
 
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                return nil
+            if skipsInjectedBlocks {
+                return userVisiblePromptSegment(from: text)
             }
 
-            if skipsInjectedBlocks, isInjectedPromptBlock(trimmed) {
-                return nil
-            }
-
-            return trimmed
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         guard !segments.isEmpty else {
@@ -1492,12 +1600,43 @@ public enum CodexRolloutReducer {
         return clipped(segments.joined(separator: " "))
     }
 
-    private static func isInjectedPromptBlock(_ text: String) -> Bool {
-        text.hasPrefix("# AGENTS.md instructions for ")
-            || text.hasPrefix("<environment_context>")
-            || text.hasPrefix("<permissions instructions>")
-            || text.hasPrefix("<collaboration_mode>")
-            || text.hasPrefix("<skills_instructions>")
+    private static func userPromptText(from text: String?) -> String? {
+        guard let text,
+              let segment = userVisiblePromptSegment(from: text) else {
+            return nil
+        }
+
+        return clipped(segment)
+    }
+
+    private static func userVisiblePromptSegment(from text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        if let markerRange = trimmed.range(of: "## My request for Codex:", options: .backwards) {
+            let request = trimmed[markerRange.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return request.isEmpty ? nil : request
+        }
+
+        return isInjectedPromptBlock(trimmed) ? nil : trimmed
+    }
+
+    package static func isInjectedPromptBlock(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("<recommended_plugins>")
+            || trimmed.hasPrefix("# AGENTS.md instructions")
+            || trimmed.hasPrefix("# Files mentioned by the user:")
+            || trimmed.hasPrefix("# Chrome tabs:")
+            || trimmed.hasPrefix("## Referenced chats with Codex:")
+            || trimmed.hasPrefix("<image name=")
+            || trimmed == "</image>"
+            || trimmed.hasPrefix("<environment_context>")
+            || trimmed.hasPrefix("<permissions instructions>")
+            || trimmed.hasPrefix("<collaboration_mode>")
+            || trimmed.hasPrefix("<skills_instructions>")
     }
 
     private static func clipped(_ value: String?, limit: Int = 110) -> String? {

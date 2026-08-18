@@ -24,6 +24,7 @@ CLI coding agents are powerful, but they pull attention away from the editor and
 |---|---|---|
 | **Claude Code** | Supported | Hook integration, JSONL session discovery, status line bridge, usage tracking |
 | **Codex** | Supported | Full hook integration (SessionStart, UserPromptSubmit, Stop), usage tracking |
+| **Antigravity** | Supported | Managed JSON hooks track each `conversationId`; `Stop` completes only when `fullyIdle` is true, and card jump-back activates the Antigravity app |
 | **OpenCode** | Supported | JS plugin integration, permission/question flows, process detection |
 | **Qoder** | Supported | Claude Code fork — same hook format, config at `~/.qoder/settings.json` |
 | **Qwen Code** | Supported | Claude Code fork — same hook format, config at `~/.qwen/settings.json` |
@@ -31,6 +32,7 @@ CLI coding agents are powerful, but they pull attention away from the editor and
 | **CodeBuddy** | Supported | Claude Code fork — same hook format, config at `~/.codebuddy/settings.json` |
 | **Gemini CLI** | Supported | Hook integration (`SessionStart`, `BeforeAgent`, `AfterAgent`, `SessionEnd`, `Notification`), session tracking, terminal jump metadata, completion-card compatibility handling |
 | **Kimi CLI** | Supported | Hook integration via `~/.kimi/config.toml` `[[hooks]]` (Moonshot AI). Kimi's hook payload is byte-compatible with Claude Code, so runtime reuses the Claude decode path; a dedicated TOML installer preserves user-authored hooks |
+| **DeepSeek Harness** | Supported | Read-only Desktop/CLI storage discovery (`session_projcache.json`, `workspace.json`), 2-second live turn watcher (`openStep` / `pendingCalls`), blank-session filtering, and terminal-attached `dsh` process matching |
 
 ## Supported Terminals
 
@@ -52,7 +54,7 @@ CLI coding agents are powerful, but they pull attention away from the editor and
 - **Notification mode** — auto-height panel for permission requests and session events
 - **Notification sounds** — configurable system sounds with mute toggle
 - **i18n** — English and Simplified Chinese
-- **Session discovery** — auto-discover from local transcripts, persist across launches
+- **Session discovery** — auto-discover from local transcripts and agent-native storage; startup discovery does not replay old completion notifications
 - **Process discovery** — match active agents via `ps`/`lsof`
 - **DMG packaging** — signing, notarization, GitHub Actions release workflow
 - **Auto-update** — Sparkle-based automatic updates with appcast

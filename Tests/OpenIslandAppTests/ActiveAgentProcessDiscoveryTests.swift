@@ -5,6 +5,37 @@ import OpenIslandCore
 
 struct ActiveAgentProcessDiscoveryTests {
     @Test
+    func discoverDeepSeekDesktopProcessWithoutTTY() {
+        let discovery = ActiveAgentProcessDiscovery { executablePath, arguments in
+            if executablePath == "/bin/ps" {
+                return """
+                  22535 1 ?? /Applications/Deepseek Harness Desktop.app/Contents/MacOS/deepseek-harness-desktop
+                """
+            }
+
+            guard executablePath == "/usr/sbin/lsof",
+                  arguments.dropFirst(2).first == "22535" else {
+                return nil
+            }
+
+            return """
+            fcwd
+            n/
+            """
+        }
+
+        #expect(discovery.discover() == [
+            .init(
+                tool: .deepseekHarness,
+                sessionID: nil,
+                workingDirectory: "/",
+                terminalTTY: nil,
+                terminalApp: nil
+            ),
+        ])
+    }
+
+    @Test
     func discoverOnlyReturnsInteractiveClaudeAndCodexProcesses() {
         let discovery = ActiveAgentProcessDiscovery { executablePath, arguments in
             if executablePath == "/bin/ps" {

@@ -84,6 +84,11 @@ struct TerminalJumpService {
             aliases: ["claude.app"]
         ),
         TerminalAppDescriptor(
+            displayName: "Antigravity",
+            bundleIdentifier: "com.google.antigravity",
+            aliases: ["antigravity", "antigravity.app"]
+        ),
+        TerminalAppDescriptor(
             displayName: "Kaku",
             bundleIdentifier: "fun.tw93.kaku",
             aliases: ["kaku"]
@@ -164,6 +169,11 @@ struct TerminalJumpService {
             displayName: "RustRover",
             bundleIdentifier: "com.jetbrains.rustrover",
             aliases: ["rustrover"]
+        ),
+        TerminalAppDescriptor(
+            displayName: "DeepSeek Harness",
+            bundleIdentifier: "io.github.hairyf.deepseek-harness-desktop",
+            aliases: ["deepseek harness", "deepseek"]
         ),
     ]
 
@@ -348,6 +358,18 @@ struct TerminalJumpService {
                 // per-session deep link, so just bring the app forward.
                 try openAction(["-b", "com.anthropic.claudefordesktop"])
                 return "Activated Claude."
+            case "com.google.antigravity":
+                // Antigravity does not currently publish a per-conversation
+                // deep link, so return to its Agent Manager surface.
+                try openAction(["-b", "com.google.antigravity"])
+                return "Activated Antigravity."
+            case "io.github.hairyf.deepseek-harness-desktop":
+                // DeepSeek Harness hosts its sessions in the desktop app / web
+                // GUI; there is no per-session deep link, so bring the app
+                // forward instead of opening the working directory in a
+                // terminal (the historical fallthrough behavior).
+                try openAction(["-b", "io.github.hairyf.deepseek-harness-desktop"])
+                return "Activated DeepSeek Harness."
             case "com.googlecode.iterm2":
                 if try jumpToITermSession(target) {
                     return "Focused the matching iTerm session."

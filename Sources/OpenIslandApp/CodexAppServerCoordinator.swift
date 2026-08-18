@@ -270,6 +270,7 @@ final class CodexAppServerCoordinator {
                 ),
                 codexMetadata: CodexSessionMetadata(
                     transcriptPath: thread.path,
+                    threadName: thread.name,
                     initialUserPrompt: thread.preview.isEmpty ? nil : thread.preview
                 )
             )

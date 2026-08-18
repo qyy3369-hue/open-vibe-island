@@ -18,6 +18,7 @@ final class SessionDiscoveryCoordinator {
         var cursorRecordsNeedPrune: Bool
         var discoveredCodexRecords: [CodexTrackedSessionRecord]
         var discoveredClaudeSessions: [AgentSession]
+        var discoveredDeepSeekSessions: [AgentSession]
         var hooksBinaryURL: URL?
     }
 
@@ -52,13 +53,20 @@ final class SessionDiscoveryCoordinator {
     private let cursorSessionRegistry = CursorSessionRegistry()
 
     @ObservationIgnored
+    @ObservationIgnored
     let codexRolloutWatcher = CodexRolloutWatcher()
+
+    @ObservationIgnored
+    let deepSeekWatcher = DeepSeekStorageWatcher()
 
     @ObservationIgnored
     private let codexRolloutDiscovery = CodexRolloutDiscovery()
 
     @ObservationIgnored
     private let claudeTranscriptDiscovery = ClaudeTranscriptDiscovery()
+
+    @ObservationIgnored
+    private let deepSeekDiscovery = DeepSeekSessionDiscovery()
 
     @ObservationIgnored
     private var codexSessionPersistenceTask: Task<Void, Never>?
@@ -100,6 +108,7 @@ final class SessionDiscoveryCoordinator {
 
         let discoveredCodex = codexRolloutDiscovery.discoverRecentSessions()
         let discoveredClaude = claudeTranscriptDiscovery.discoverRecentSessions()
+        let discoveredDeepSeek = deepSeekDiscovery.discoverSessions().map { $0.makeAgentSession() }
 
         return StartupDiscoveryPayload(
             codexRecords: codexRecords,
@@ -112,6 +121,7 @@ final class SessionDiscoveryCoordinator {
             cursorRecordsNeedPrune: cursorRecords != allCursor,
             discoveredCodexRecords: discoveredCodex,
             discoveredClaudeSessions: discoveredClaude,
+            discoveredDeepSeekSessions: discoveredDeepSeek,
             hooksBinaryURL: HooksBinaryLocator.locate(
                 executableDirectory: Bundle.main.executableURL?.deletingLastPathComponent()
             )
@@ -177,6 +187,16 @@ final class SessionDiscoveryCoordinator {
             scheduleClaudeSessionPersistence()
             onStatusMessage?("Discovered \(payload.discoveredClaudeSessions.count) recent Claude session(s) from local transcripts.")
         }
+
+        // Merge discovered DeepSeek sessions.
+        if !payload.discoveredDeepSeekSessions.isEmpty {
+            let mergedSessions = mergeDiscoveredSessions(payload.discoveredDeepSeekSessions)
+            state = SessionState(sessions: mergedSessions)
+            onStatusMessage?("Discovered \(payload.discoveredDeepSeekSessions.count) recent DeepSeek session(s) from local storages.")
+        }
+
+        // Start DeepSeek storage watcher.
+        deepSeekWatcher.start()
 
         // Sync rollout tracking with current sessions.
         refreshCodexRolloutTracking()
@@ -319,9 +339,17 @@ final class SessionDiscoveryCoordinator {
             return existing.isEmpty ? nil : existing
         }
 
+        let existingInitialPrompt = existing.initialUserPrompt
+        let shouldReplaceInitialPrompt =
+            existingInitialPrompt.map(CodexRolloutReducer.isInjectedPromptBlock) ?? false
+        let initialUserPrompt = shouldReplaceInitialPrompt
+            ? discovered.initialUserPrompt ?? discovered.lastUserPrompt ?? existingInitialPrompt
+            : existingInitialPrompt ?? discovered.initialUserPrompt ?? discovered.lastUserPrompt
+
         let merged = CodexSessionMetadata(
             transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
-            initialUserPrompt: existing.initialUserPrompt ?? discovered.initialUserPrompt ?? discovered.lastUserPrompt,
+            threadName: discovered.threadName ?? existing.threadName,
+            initialUserPrompt: initialUserPrompt,
             lastUserPrompt: discovered.lastUserPrompt ?? existing.lastUserPrompt,
             lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
             currentTool: discovered.currentTool ?? existing.currentTool,
@@ -435,13 +463,17 @@ final class SessionDiscoveryCoordinator {
         let existingIDs = Set(state.sessions.filter { $0.tool == .codex }.map(\.id))
         let existingPaths = Set(state.sessions.compactMap(\.codexMetadata?.transcriptPath))
 
-        let newRecords = records.filter { record in
-            !existingIDs.contains(record.sessionID)
-                && (record.codexMetadata?.transcriptPath).map { !existingPaths.contains($0) } ?? true
+        let recordsToMerge = records.filter { record in
+            if let existing = state.sessions.first(where: { $0.id == record.sessionID }) {
+                return record.codexMetadata?.threadName != existing.codexMetadata?.threadName
+            }
+            return !existingIDs.contains(record.sessionID)
+                && ((record.codexMetadata?.transcriptPath).map { !existingPaths.contains($0) } ?? true)
         }
-        guard !newRecords.isEmpty else { return }
+        guard !recordsToMerge.isEmpty else { return }
 
-        let newSessions = newRecords.map { record -> AgentSession in
+        let newRecordCount = recordsToMerge.filter { !existingIDs.contains($0.sessionID) }.count
+        let refreshedSessions = recordsToMerge.map { record -> AgentSession in
             var session = record.session
             session.isCodexAppSession = true
             session.isProcessAlive = true
@@ -463,11 +495,13 @@ final class SessionDiscoveryCoordinator {
             return session
         }
 
-        let merged = mergeDiscoveredSessions(newSessions)
+        let merged = mergeDiscoveredSessions(refreshedSessions)
         state = SessionState(sessions: merged)
         refreshCodexRolloutTracking()
         scheduleCodexSessionPersistence()
-        onStatusMessage?("Discovered \(newRecords.count) new Codex.app session(s) via rollout re-scan.")
+        if newRecordCount > 0 {
+            onStatusMessage?("Discovered \(newRecordCount) new Codex.app session(s) via rollout re-scan.")
+        }
     }
 
     // MARK: - Persistence scheduling

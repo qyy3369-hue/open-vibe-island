@@ -168,7 +168,14 @@ extension AgentSession {
     }
 
     var spotlightHeadlineText: String {
-        var headline = spotlightWorkspaceName
+        if tool == .codex,
+           let threadName = codexMetadata?.threadName?.trimmedForSurface,
+           !threadName.isEmpty {
+            return threadName
+        }
+
+        let workspaceName = spotlightWorkspaceName
+        var headline = workspaceName
 
         if let branch = spotlightWorktreeBranch {
             headline += " (\(branch))"
@@ -176,6 +183,10 @@ extension AgentSession {
 
         guard let prompt = spotlightHeadlinePromptText else {
             return headline
+        }
+
+        guard workspaceName != "/" else {
+            return prompt
         }
 
         return "\(headline) · \(prompt)"
@@ -206,6 +217,8 @@ extension AgentSession {
             return "Claude"
         case .codex:
             return "Codex"
+        case .antigravity:
+            return "Antigravity"
         case .geminiCLI:
             return "Gemini"
         case .openCode:
@@ -222,6 +235,8 @@ extension AgentSession {
             return "Cursor"
         case .kimiCLI:
             return "Kimi"
+        case .deepseekHarness:
+            return "DeepSeek"
         }
     }
 

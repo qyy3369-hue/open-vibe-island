@@ -139,6 +139,15 @@ else
     echo
 fi
 
-codesign --force --deep --sign "$sign_identity" "$bundle_dir" 2>/dev/null || true
+# Finder/File Provider metadata copied from binary dependencies (notably
+# Sparkle.framework) is rejected by codesign as unsealed detritus. Strip
+# extended attributes from the generated dev bundle only; source artifacts
+# and the user's other applications are left untouched.
+xattr -cr "$bundle_dir"
+
+# Never launch a partially signed bundle. Suppressing this failure previously
+# let macOS kill OpenIslandApp immediately with CODESIGNING / Invalid Page.
+codesign --force --deep --sign "$sign_identity" "$bundle_dir"
+codesign --verify --deep --strict --verbose=2 "$bundle_dir"
 
 open -na "$bundle_dir"

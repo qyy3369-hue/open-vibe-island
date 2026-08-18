@@ -179,6 +179,62 @@ final class TerminalJumpServiceTests: XCTestCase {
         XCTAssertTrue(openedArguments.values.isEmpty)
     }
 
+    func testAntigravityJumpActivatesAgentManager() throws {
+        let openedArguments = OpenedArgumentsBox()
+        let service = TerminalJumpService(
+            applicationResolver: { bundleIdentifier in
+                bundleIdentifier == "com.google.antigravity"
+                    ? URL(fileURLWithPath: "/Applications/Antigravity.app")
+                    : nil
+            },
+            appRunningChecker: { $0 == "com.google.antigravity" },
+            openAction: { arguments in
+                openedArguments.values.append(arguments)
+            },
+            appleScriptRunner: { _ in "" }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Antigravity",
+                workspaceName: "worktree",
+                paneTitle: "Antigravity abc123",
+                workingDirectory: "/Users/test/worktree"
+            )
+        )
+
+        XCTAssertEqual(result, "Activated Antigravity.")
+        XCTAssertEqual(openedArguments.values, [["-b", "com.google.antigravity"]])
+    }
+
+    func testDeepSeekHarnessJumpActivatesDesktopAppInsteadOfTerminal() throws {
+        let openedArguments = OpenedArgumentsBox()
+        let service = TerminalJumpService(
+            applicationResolver: { bundleIdentifier in
+                bundleIdentifier == "io.github.hairyf.deepseek-harness-desktop"
+                    ? URL(fileURLWithPath: "/Applications/Deepseek Harness Desktop.app")
+                    : nil
+            },
+            appRunningChecker: { $0 == "io.github.hairyf.deepseek-harness-desktop" },
+            openAction: { arguments in
+                openedArguments.values.append(arguments)
+            },
+            appleScriptRunner: { _ in "" }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "DeepSeek Harness",
+                workspaceName: "deepseek-harness",
+                paneTitle: "",
+                workingDirectory: "/Users/test/DeepSeek harness"
+            )
+        )
+
+        XCTAssertEqual(result, "Activated DeepSeek Harness.")
+        XCTAssertEqual(openedArguments.values, [["-b", "io.github.hairyf.deepseek-harness-desktop"]])
+    }
+
     func testWarpJumpReturnsImmediatelyWhenAlreadyOnTargetPane() throws {
         let openedArguments = OpenedArgumentsBox()
         let keystroker = KeystrokeInjectorSpy()

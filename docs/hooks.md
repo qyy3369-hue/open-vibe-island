@@ -1,14 +1,16 @@
 # Hook System
 
-OpenIsland receives hook events from AI agents (Codex / Claude Code / Gemini CLI) via the `OpenIslandHooks` CLI. The CLI forwards payloads to the app over a Unix socket and, when necessary, writes a directive back to stdout so the agent can act on it (e.g. block a tool call).
+OpenIsland receives hook events from AI agents (Codex / Claude Code / Gemini CLI / Antigravity) via the `OpenIslandHooks` CLI. The CLI forwards payloads to the app over a Unix socket and, when necessary, writes a directive back to stdout so the agent can act on it (e.g. block a tool call).
+
+DeepSeek Harness is not part of this hook pipeline. It is monitored read-only through native storage discovery; see [docs/architecture.md](./architecture.md#storage-observed-agents-deepseek-harness) and [docs/agent-handbook.md](./agent-handbook.md#32-原生存储监听方式-native-storage-watcher).
 
 ## Architecture
 
 ```
-Agent (Codex / Claude Code / Gemini CLI)
+Agent (Codex / Claude Code / Gemini CLI / Antigravity)
   │  stdin: JSON payload
   ▼
-OpenIslandHooks CLI  (--source codex | --source claude | --source gemini)
+OpenIslandHooks CLI  (--source codex | --source claude | --source gemini | --source antigravity)
   │  Unix socket
   ▼
 BridgeServer → AppModel → UI
@@ -21,6 +23,25 @@ Agent
 ```
 
 **Fail-open principle**: if the bridge is unavailable the hook process exits silently without writing to stdout, so the agent continues running unaffected.
+
+Antigravity is the exception to the last stdout detail: its hook contract expects JSON output. Open Island always returns a pass-through response (`{}` for `PreInvocation`, a non-`continue` decision for `Stop`) even when the bridge is unavailable, so monitoring never blocks or extends the Antigravity execution loop.
+
+---
+
+## Antigravity Hooks (`--source antigravity`)
+
+**Payload type**: `AntigravityHookPayload`
+**Source**: [`Sources/OpenIslandCore/AntigravityHooks.swift`](../Sources/OpenIslandCore/AntigravityHooks.swift)
+
+The managed installer writes one isolated hook definition named `open-island-task-monitor` to `~/.gemini/config/hooks.json`. Existing hook definitions are preserved, and uninstall removes only this definition.
+
+| Event | Island phase | Completion rule |
+|---|---|---|
+| `PreInvocation` | `running` | First model invocation creates the Antigravity session; later invocations refresh it |
+| `Stop` with `fullyIdle: false` | `running` | Background commands or asynchronous tasks are still active |
+| `Stop` with `fullyIdle: true` | `completed` | The agent and all background work are finished |
+
+Antigravity supplies the conversation UUID, workspace paths, transcript path, model name, termination reason, and `fullyIdle` directly in the official JSON hook payload. Open Island does not parse Antigravity's private SQLite conversation database.
 
 ## Skip Hooks For Delegated Control
 

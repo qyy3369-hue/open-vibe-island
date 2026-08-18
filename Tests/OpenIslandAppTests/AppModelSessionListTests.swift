@@ -314,8 +314,14 @@ struct AppModelSessionListTests {
     func islandSessionSectionsGroupStaleCompletedIntoIdle() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionGroup = .state
-        model.completedStaleThreshold = .fiveMinutes
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .fiveMinutes
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .fiveMinutes
+        }
 
         var approval = listSession(id: "approval", phase: .waitingForApproval, updatedAt: now)
         approval.permissionRequest = PermissionRequest(
@@ -340,8 +346,14 @@ struct AppModelSessionListTests {
     func islandSessionSectionsKeepCompletedInDoneWhenStaleThresholdIsNever() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionGroup = .state
-        model.completedStaleThreshold = .never
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .never
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionGroup = .state
+            $0.completedStaleThreshold = .never
+        }
 
         var oldDone = listSession(id: "old-done", phase: .completed, updatedAt: now.addingTimeInterval(-86_400))
         oldDone.isProcessAlive = true
@@ -355,7 +367,12 @@ struct AppModelSessionListTests {
     func islandSessionListCanSortByLastUpdate() {
         let now = Date()
         let model = AppModel()
-        model.islandSessionSort = .lastUpdate
+        model.updateAppearancePreferences(for: .notch) {
+            $0.sessionSort = .lastUpdate
+        }
+        model.updateAppearancePreferences(for: .topBar) {
+            $0.sessionSort = .lastUpdate
+        }
 
         var olderRunning = listSession(id: "older-running", phase: .running, updatedAt: now.addingTimeInterval(-120))
         var newerCompleted = listSession(id: "newer-completed", phase: .completed, updatedAt: now.addingTimeInterval(-10))
@@ -562,6 +579,126 @@ struct AppModelSessionListTests {
         #expect(model.notchStatus == .closed)
         #expect(model.notchOpenReason == nil)
         #expect(model.islandSurface == .sessionList())
+    }
+
+    @Test
+    func deepSeekFastCompletionPresentsNotificationAfterRunningBootstrap() async throws {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel(
+            isNotificationSessionAlreadyFrontmost: { _ in false }
+        )
+        model.isResolvingInitialLiveSessions = false
+        model.notchStatus = .closed
+        model.notchOpenReason = nil
+
+        model.applyTrackedEvent(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: "deepseek-fast-session",
+                    title: "DeepSeek · Fast Task",
+                    tool: .deepseekHarness,
+                    origin: .live,
+                    initialPhase: .running,
+                    summary: "DeepSeek is working on Fast Task.",
+                    timestamp: now
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .rollout
+        )
+        model.applyTrackedEvent(
+            .sessionCompleted(
+                SessionCompleted(
+                    sessionID: "deepseek-fast-session",
+                    summary: "DeepSeek completed task.",
+                    timestamp: now.addingTimeInterval(1)
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .rollout
+        )
+
+        for _ in 0..<20 {
+            if model.notchStatus == .opened {
+                break
+            }
+            await Task.yield()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(model.state.session(id: "deepseek-fast-session")?.phase == .completed)
+        #expect(model.notchStatus == .opened)
+        #expect(model.notchOpenReason == .notification)
+        #expect(model.islandSurface == .sessionList(actionableSessionID: "deepseek-fast-session"))
+    }
+
+    @Test
+    func deepSeekDesktopProcessKeepsStorageObservedSessionAliveForLaterCompletion() {
+        let now = Date.now
+        let discovery = ActiveAgentProcessDiscovery { executablePath, arguments in
+            if executablePath == "/bin/ps" {
+                return """
+                  22535 1 ?? /Applications/Deepseek Harness Desktop.app/Contents/MacOS/deepseek-harness-desktop
+                """
+            }
+
+            guard executablePath == "/usr/sbin/lsof",
+                  arguments.dropFirst(2).first == "22535" else {
+                return nil
+            }
+
+            return """
+            fcwd
+            n/
+            """
+        }
+        let activeProcesses = discovery.discover()
+        let model = AppModel()
+        model.isResolvingInitialLiveSessions = false
+        model.state = SessionState(sessions: [
+            AgentSession(
+                id: "deepseek-desktop-session",
+                title: "DeepSeek · Desktop task",
+                tool: .deepseekHarness,
+                origin: .live,
+                attachmentState: .attached,
+                phase: .running,
+                summary: "DeepSeek is working on Desktop task.",
+                updatedAt: now,
+                jumpTarget: JumpTarget(
+                    terminalApp: "DeepSeek Harness",
+                    workspaceName: "desktop-task",
+                    paneTitle: "Desktop task",
+                    workingDirectory: "/tmp/desktop-task"
+                )
+            ),
+        ])
+
+        model.monitoring.reconcileSessionAttachments(
+            activeProcesses: activeProcesses,
+            ghosttyAvailability: .available([], appIsRunning: false),
+            terminalAvailability: .available([], appIsRunning: false),
+            preResolvedJumpTargets: [:],
+            observedCodexAppRunning: false
+        )
+
+        #expect(activeProcesses.count == 1)
+        #expect(model.state.session(id: "deepseek-desktop-session")?.isProcessAlive == true)
+        #expect(model.state.session(id: "deepseek-desktop-session")?.isVisibleInIsland == true)
+
+        model.applyTrackedEvent(
+            .sessionCompleted(
+                SessionCompleted(
+                    sessionID: "deepseek-desktop-session",
+                    summary: "DeepSeek completed task.",
+                    timestamp: now.addingTimeInterval(1)
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .rollout
+        )
+
+        #expect(model.state.session(id: "deepseek-desktop-session")?.phase == .completed)
     }
 
     @Test
@@ -880,6 +1017,117 @@ struct AppModelSessionListTests {
         #expect(merged.first?.claudeMetadata?.transcriptPath == "/tmp/claude.jsonl")
         #expect(merged.first?.claudeMetadata?.lastUserPrompt == "Check the Claude session registry.")
         #expect(merged.first?.phase == .running)
+    }
+
+    @Test
+    func mergeDiscoveredCodexSessionsReplacesInjectedCachedInitialPromptOnly() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel()
+        model.state = SessionState(
+            sessions: [
+                AgentSession(
+                    id: "wrapped-codex-session",
+                    title: "Codex · /",
+                    tool: .codex,
+                    origin: .live,
+                    attachmentState: .stale,
+                    phase: .completed,
+                    summary: "Recovered from cache",
+                    updatedAt: now.addingTimeInterval(-60),
+                    codexMetadata: CodexSessionMetadata(
+                        threadName: "Cached sidebar name",
+                        initialUserPrompt: "# Files mentioned by the user: ## screenshot.png: /tmp/screenshot.png",
+                        lastUserPrompt: "# Chrome tabs: - Current URL: https://example.com"
+                    )
+                ),
+                AgentSession(
+                    id: "valid-codex-session",
+                    title: "Codex · project",
+                    tool: .codex,
+                    origin: .live,
+                    attachmentState: .stale,
+                    phase: .completed,
+                    summary: "Recovered from cache",
+                    updatedAt: now.addingTimeInterval(-60),
+                    codexMetadata: CodexSessionMetadata(
+                        initialUserPrompt: "Keep this valid cached topic."
+                    )
+                ),
+                AgentSession(
+                    id: "environment-context-codex-session",
+                    title: "Codex · /",
+                    tool: .codex,
+                    origin: .live,
+                    attachmentState: .stale,
+                    phase: .completed,
+                    summary: "Recovered from cache",
+                    updatedAt: now.addingTimeInterval(-60),
+                    codexMetadata: CodexSessionMetadata(
+                        initialUserPrompt: """
+                            <environment_context>
+                              <cwd>/tmp/open-island</cwd>
+                            </environment_context>
+                            """
+                    )
+                ),
+            ]
+        )
+
+        let merged = model.discovery.mergeDiscoveredSessions([
+            AgentSession(
+                id: "wrapped-codex-session",
+                title: "Codex · /",
+                tool: .codex,
+                origin: .live,
+                attachmentState: .stale,
+                phase: .completed,
+                summary: "Recovered from rollout",
+                updatedAt: now,
+                codexMetadata: CodexSessionMetadata(
+                    threadName: "Renamed sidebar name",
+                    initialUserPrompt: "Fix the session headline.",
+                    lastUserPrompt: "The headline still looks wrong."
+                )
+            ),
+            AgentSession(
+                id: "valid-codex-session",
+                title: "Codex · project",
+                tool: .codex,
+                origin: .live,
+                attachmentState: .stale,
+                phase: .completed,
+                summary: "Recovered from rollout",
+                updatedAt: now,
+                codexMetadata: CodexSessionMetadata(
+                    initialUserPrompt: "Do not replace the cached topic."
+                )
+            ),
+            AgentSession(
+                id: "environment-context-codex-session",
+                title: "Codex · /",
+                tool: .codex,
+                origin: .live,
+                attachmentState: .stale,
+                phase: .completed,
+                summary: "Recovered from rollout",
+                updatedAt: now,
+                codexMetadata: CodexSessionMetadata(
+                    initialUserPrompt: "Replace the injected environment context."
+                )
+            ),
+        ])
+
+        let wrapped = merged.first(where: { $0.id == "wrapped-codex-session" })
+        let valid = merged.first(where: { $0.id == "valid-codex-session" })
+        let environmentContext = merged.first(where: { $0.id == "environment-context-codex-session" })
+        #expect(wrapped?.codexMetadata?.initialUserPrompt == "Fix the session headline.")
+        #expect(wrapped?.codexMetadata?.threadName == "Renamed sidebar name")
+        #expect(wrapped?.codexMetadata?.lastUserPrompt == "The headline still looks wrong.")
+        #expect(valid?.codexMetadata?.initialUserPrompt == "Keep this valid cached topic.")
+        #expect(
+            environmentContext?.codexMetadata?.initialUserPrompt
+                == "Replace the injected environment context."
+        )
     }
 
     @Test

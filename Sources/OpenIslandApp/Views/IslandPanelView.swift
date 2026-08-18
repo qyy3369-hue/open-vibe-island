@@ -1463,10 +1463,14 @@ private struct IslandSessionRow: View {
             "claude"
         case .geminiCLI:
             "gemini"
+        case .antigravity:
+            "antigravity"
         case .qwenCode:
             "qwen"
         case .kimiCLI:
             "kimi"
+        case .deepseekHarness:
+            "deepseek"
         default:
             session.tool.shortName.lowercased()
         }
