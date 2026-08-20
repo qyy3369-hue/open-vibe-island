@@ -34,9 +34,10 @@ struct OpenIslandHooksCLI {
         let arguments = Array(CommandLine.arguments.dropFirst())
         let source = hookSource(arguments: arguments)
         let antigravityEvent = antigravityHookEvent(arguments: arguments)
+        var antigravityStopDecision = AntigravityStopDecision.allow
         defer {
             if source == .antigravity {
-                writeAntigravityPassThroughOutput(for: antigravityEvent)
+                writeAntigravityPassThroughOutput(for: antigravityEvent, stopDecision: antigravityStopDecision)
             }
         }
 
@@ -124,6 +125,13 @@ struct OpenIslandHooksCLI {
                     .decode(AntigravityHookPayload.self, from: input)
                     .withHookEvent(antigravityEvent)
 
+                // Antigravity's Stop hook is a blocking decide hook: "continue"
+                // keeps the agent alive so its background tasks can finish and a
+                // final fullyIdle Stop arrives. Only allow stopping once the hook
+                // reports fullyIdle == true, otherwise the island stays stuck in
+                // the running state forever.
+                antigravityStopDecision = payload.fullyIdle == true ? .allow : .continueRunning
+
                 _ = try? client.send(.processAntigravityHook(payload), timeout: 45)
             }
         } catch {
@@ -178,11 +186,21 @@ struct OpenIslandHooksCLI {
         return nil
     }
 
-    private static func writeAntigravityPassThroughOutput(for event: AntigravityHookEventName?) {
+    private enum AntigravityStopDecision {
+        case allow
+        case continueRunning
+    }
+
+    private static func writeAntigravityPassThroughOutput(
+        for event: AntigravityHookEventName?,
+        stopDecision: AntigravityStopDecision
+    ) {
         let output: String
         switch event {
         case .stop:
-            output = "{\"decision\":\"allow\"}\n"
+            output = stopDecision == .continueRunning
+                ? "{\"decision\":\"continue\"}\n"
+                : "{\"decision\":\"allow\"}\n"
         case .preInvocation, .none:
             output = "{}\n"
         }
