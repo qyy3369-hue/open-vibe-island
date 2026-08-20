@@ -100,6 +100,10 @@ public extension AntigravityHookPayload {
             return "Antigravity stopped with an error in \(workspaceName)."
         }
 
+        if fullyIdle == false {
+            return "Antigravity finished the task in \(workspaceName); background work may still be active."
+        }
+
         switch terminationReason?.lowercased() {
         case "max_steps_exceeded":
             return "Antigravity stopped after reaching its step limit in \(workspaceName)."

@@ -84,6 +84,167 @@ struct CodexHooksTests {
 
         #expect(payload.terminalApp == "Codex.app")
         #expect(payload.warpPaneUUID == nil)
+        #expect(payload.defaultJumpTarget.terminalApp == "Codex.app")
+        #expect(payload.defaultJumpTarget.codexThreadID == "s1")
+    }
+
+    @Test
+    func codexWithRuntimeContextDetectsCodexDesktopAppFromChatGPTAncestorCommand() {
+        let payload = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s1",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: [:],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: { ["/Applications/ChatGPT.app/Contents/Resources/codex"] }
+        )
+
+        #expect(payload.terminalApp == "Codex.app")
+        #expect(payload.warpPaneUUID == nil)
+        #expect(payload.defaultJumpTarget.terminalApp == "Codex.app")
+        #expect(payload.defaultJumpTarget.codexThreadID == "s1")
+    }
+
+    @Test
+    func codexWithRuntimeContextDetectsCodexDesktopAppFromCodexAppAncestorCommand() {
+        let payloadMacOS = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s1",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: [:],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: { ["/Applications/Codex.app/Contents/MacOS/Codex"] }
+        )
+
+        #expect(payloadMacOS.terminalApp == "Codex.app")
+        #expect(payloadMacOS.defaultJumpTarget.terminalApp == "Codex.app")
+        #expect(payloadMacOS.defaultJumpTarget.codexThreadID == "s1")
+
+        let payloadResources = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s2",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: [:],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: { ["/Applications/Codex.app/Contents/Resources/codex"] }
+        )
+
+        #expect(payloadResources.terminalApp == "Codex.app")
+        #expect(payloadResources.defaultJumpTarget.terminalApp == "Codex.app")
+        #expect(payloadResources.defaultJumpTarget.codexThreadID == "s2")
+    }
+
+    @Test
+    func codexWithRuntimeContextDoesNotDetectOrdinaryCodexCLIBinaryAsCodexApp() {
+        let payload = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s1",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: [:],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: { ["/usr/local/bin/codex"] }
+        )
+
+        #expect(payload.terminalApp == nil)
+        #expect(payload.defaultJumpTarget.terminalApp == "Unknown")
+        #expect(payload.defaultJumpTarget.codexThreadID == nil)
+    }
+
+    @Test
+    func codexWithRuntimeContextDoesNotInvokeAncestorProviderWhenTerminalInferredFromEnvironment() {
+        var providerCallCount = 0
+
+        let payloadGhostty = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s1",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: ["TERM_PROGRAM": "ghostty"],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: {
+                providerCallCount += 1
+                return ["/Applications/ChatGPT.app/Contents/Resources/codex"]
+            }
+        )
+
+        #expect(payloadGhostty.terminalApp == "Ghostty")
+        #expect(payloadGhostty.defaultJumpTarget.terminalApp == "Ghostty")
+        #expect(payloadGhostty.defaultJumpTarget.codexThreadID == nil)
+        #expect(providerCallCount == 0)
+
+        let payloadVSCode = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s2",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: ["TERM_PROGRAM": "vscode"],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: {
+                providerCallCount += 1
+                return ["/Applications/ChatGPT.app/Contents/Resources/codex"]
+            }
+        )
+
+        #expect(payloadVSCode.terminalApp == "VS Code")
+        #expect(payloadVSCode.defaultJumpTarget.terminalApp == "VS Code")
+        #expect(payloadVSCode.defaultJumpTarget.codexThreadID == nil)
+        #expect(providerCallCount == 0)
+    }
+
+    @Test
+    func codexWithRuntimeContextDoesNotMatchLooseWordsAsCodexApp() {
+        let payload = CodexHookPayload(
+            cwd: "/Users/u/project",
+            hookEventName: .sessionStart,
+            model: "gpt-4o",
+            permissionMode: .default,
+            sessionID: "s1",
+            transcriptPath: nil
+        ).withRuntimeContext(
+            environment: [:],
+            currentTTYProvider: { nil },
+            terminalLocatorProvider: { _ in (sessionID: nil, tty: nil, title: nil) },
+            warpPaneResolver: { _ in nil },
+            ancestorCommandsProvider: { ["/Users/u/chatgpt.app/bin/codex", "echo /Applications/ChatGPT.app and codex"] }
+        )
+
+        #expect(payload.terminalApp == nil)
+        #expect(payload.defaultJumpTarget.terminalApp == "Unknown")
+        #expect(payload.defaultJumpTarget.codexThreadID == nil)
     }
 
     @Test

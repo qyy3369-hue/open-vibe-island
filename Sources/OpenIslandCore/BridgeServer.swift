@@ -476,12 +476,14 @@ public final class BridgeServer: @unchecked Sendable {
 
     private func handleCodexHook(_ payload: CodexHookPayload, from clientID: UUID) {
         // Filter out Codex.app internal invocations (e.g. conversation title
-        // generation).  These fire hooks but have no transcript file — they're
-        // ephemeral API calls, not user-facing sessions.
-        if payload.terminalApp == "Codex.app",
-           (payload.transcriptPath ?? "").isEmpty {
-            send(.response(.acknowledged), to: clientID)
-            return
+        // generation, ambient suggestions). These fire hooks but have no transcript
+        // file — they're ephemeral API calls or background tasks, not user-facing sessions.
+        let isTranscriptEmpty = (payload.transcriptPath ?? "").isEmpty
+        if isTranscriptEmpty {
+            if payload.terminalApp == "Codex.app" || isCodexAmbientSuggestion(prompt: payload.prompt) {
+                send(.response(.acknowledged), to: clientID)
+                return
+            }
         }
 
         switch payload.hookEventName {
@@ -612,6 +614,22 @@ public final class BridgeServer: @unchecked Sendable {
             )
             send(.response(.acknowledged), to: clientID)
         }
+    }
+
+    private func isCodexAmbientSuggestion(prompt: String?) -> Bool {
+        guard let prompt, !prompt.isEmpty else {
+            return false
+        }
+
+        if prompt.contains("# Overview") && prompt.contains("Generate 0 to 3 hyperpersonalized suggestions") {
+            return true
+        }
+
+        if prompt.contains("Codex ambient suggestions") {
+            return true
+        }
+
+        return false
     }
 
     private func handleClaudeHook(_ payload: ClaudeHookPayload, from clientID: UUID) {
@@ -1414,28 +1432,19 @@ public final class BridgeServer: @unchecked Sendable {
             )
 
         case .stop:
-            if payload.fullyIdle != true {
-                emit(
-                    .activityUpdated(
-                        SessionActivityUpdated(
-                            sessionID: payload.conversationID,
-                            summary: "Antigravity still has background tasks in \(payload.workspaceName).",
-                            phase: .running,
-                            timestamp: .now
-                        )
+            // Stop means the Antigravity execution loop has terminated. The
+            // fullyIdle flag only describes whether detached/background work
+            // may remain; it does not mean the agent conversation is still
+            // running, and Antigravity does not promise a later Stop event.
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.conversationID,
+                        summary: payload.stoppedSummary,
+                        timestamp: .now
                     )
                 )
-            } else {
-                emit(
-                    .sessionCompleted(
-                        SessionCompleted(
-                            sessionID: payload.conversationID,
-                            summary: payload.stoppedSummary,
-                            timestamp: .now
-                        )
-                    )
-                )
-            }
+            )
         }
 
         send(.response(.acknowledged), to: clientID)

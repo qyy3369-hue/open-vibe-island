@@ -847,6 +847,103 @@ struct SessionStateTests {
     }
 
     @Test
+    func codexAmbientSuggestionsWithoutTranscriptAreIgnoredByBridgeServer() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        // Ambient suggestion (Overview + hyperpersonalized suggestions) without transcript -> ignored
+        let ambientOverviewPayload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "ambient-overview-1",
+            transcriptPath: nil,
+            prompt: "# Overview\nPlease inspect the repository and Generate 0 to 3 hyperpersonalized suggestions for the user."
+        )
+        let response1 = try BridgeCommandClient(socketURL: socketURL).send(.processCodexHook(ambientOverviewPayload))
+        #expect(response1 == .acknowledged)
+
+        // Ambient suggestion (safety review) without transcript -> ignored
+        let ambientSafetyPayload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "ambient-safety-2",
+            transcriptPath: nil,
+            prompt: "Review candidate prompts for Codex ambient suggestions safety guardrails."
+        )
+        let response2 = try BridgeCommandClient(socketURL: socketURL).send(.processCodexHook(ambientSafetyPayload))
+        #expect(response2 == .acknowledged)
+
+        // Normal session without transcript -> processed normally
+        let normalPayload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "normal-session-3",
+            transcriptPath: nil,
+            prompt: "Fix the authentication middleware bug."
+        )
+        let response3 = try BridgeCommandClient(socketURL: socketURL).send(.processCodexHook(normalPayload))
+        #expect(response3 == .acknowledged)
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+
+        #expect(startedEvent.isSessionStarted)
+        guard case let .sessionStarted(session) = startedEvent else {
+            Issue.record("Expected normal sessionStarted event")
+            return
+        }
+        #expect(session.sessionID == "normal-session-3")
+    }
+
+    @Test
+    func codexAmbientSuggestionsWithTranscriptAreProcessedByBridgeServer() async throws {
+        let socketURL = BridgeSocketLocation.uniqueTestURL()
+        let server = BridgeServer(socketURL: socketURL)
+        try server.start()
+        defer { server.stop() }
+
+        let observer = LocalBridgeClient(socketURL: socketURL)
+        let stream = try observer.connect()
+        defer { observer.disconnect() }
+        try await observer.send(.registerClient(role: .observer))
+
+        let payloadWithTranscript = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "session-with-transcript",
+            transcriptPath: "/tmp/codex/sessions/session-with-transcript.jsonl",
+            prompt: "# Overview\nGenerate 0 to 3 hyperpersonalized suggestions"
+        )
+        let response = try BridgeCommandClient(socketURL: socketURL).send(.processCodexHook(payloadWithTranscript))
+        #expect(response == .acknowledged)
+
+        var iterator = stream.makeAsyncIterator()
+        let startedEvent = try await nextEvent(from: &iterator)
+
+        #expect(startedEvent.isSessionStarted)
+        guard case let .sessionStarted(session) = startedEvent else {
+            Issue.record("Expected sessionStarted event for session with transcript")
+            return
+        }
+        #expect(session.sessionID == "session-with-transcript")
+    }
+
+    @Test
     func cursorHookPreservesToolMetadataAcrossNonStopEvents() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = BridgeServer(socketURL: socketURL)
